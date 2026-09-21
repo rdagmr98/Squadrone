@@ -23,22 +23,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Come corsi SMAM: READ_PAT iniettato al build, gli utenti non lo digiano.
-      - name: Inject READ_PAT into config.js
+      # Come corsi/AVES: PAT iniettato al build — gli utenti non lo digitano.
+      # Preferisce SQUADRONE_PAT; fallback READ_PAT (stesso nome di corsi).
+      - name: Inject PAT into config.js
         env:
+          SQUADRONE_PAT: ${{ secrets.SQUADRONE_PAT }}
           READ_PAT: ${{ secrets.READ_PAT }}
         run: |
-          if [ -z "$READ_PAT" ]; then
-            echo "::error::Secret READ_PAT mancante (Contents R/W su squarone-data), come su corsi."
+          PAT="${SQUADRONE_PAT:-$READ_PAT}"
+          if [ -z "$PAT" ]; then
+            echo "::error::Serve secret SQUADRONE_PAT (o READ_PAT) con Contents R/W su squarone-data."
             exit 1
           fi
+          export PAT
           python3 - <<'PY'
           import json, os, pathlib
           cfg = {
             "owner": "rdagmr98",
             "repo": "squadrone-data",
             "branch": "main",
-            "pat": os.environ["READ_PAT"],
+            "pat": os.environ["PAT"],
             "adminPin": "1234",
           }
           pathlib.Path("js/config.js").write_text(
@@ -46,7 +50,7 @@ jobs:
               "window.SQUADRONE_CONFIG = " + json.dumps(cfg, indent=2) + ";\n",
               encoding="utf-8",
           )
-          print("config.js written")
+          print("config.js written with injected PAT")
           PY
 
       - uses: actions/configure-pages@v5
