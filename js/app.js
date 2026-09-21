@@ -1,603 +1,457 @@
-/* Squadrone — registro presenza / assenze a calendario (UI italiana). */
+/* Squadrone Mantenimento · H7 — presenze da cellulare. */
 (function () {
   "use strict";
 
-  var MOTIVI = [
-    { id: "licenze", label: "Licenze" },
-    { id: "guardia", label: "Guardia" },
-    { id: "polveriera", label: "Polveriera" },
-    { id: "72_stormo", label: "72° Stormo" },
-    { id: "h7", label: "Hangar 7" },
-    { id: "ritardi", label: "Ritardi" },
-    { id: "altro", label: "Altro / note" }
-  ];
+  const TIPI = {
+    licenza: { l: "Licenza", i: "suitcase-rolling", c: "#22d3ee" },
+    guardia: { l: "Guardia", i: "shield-star", c: "#fbbf24" },
+    polveriera: { l: "Polveriera", i: "warehouse", c: "#fb7185" },
+    stormo72: { l: "72° Stormo", i: "airplane-in-flight", c: "#60a5fa" },
+    ritardo: { l: "Ritardo", i: "clock-countdown", c: "#fb923c" },
+    altro: { l: "Altro", i: "note-pencil", c: "#a78bfa" }
+  };
+  const PRESENTE = { l: "Presente", i: "check-circle", c: "#34d399" };
+  const KEY = "sq_uid";
+  const S = { me: null, view: "me", day: null, reopen: null, back: null, last: 0 };
 
-  var WD = ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"];
-  var selectedDate = null;
+  const $ = (s, r = document) => r.querySelector(s);
+  const app = $("#app"), nav = $("#nav"), dlg = $("#sheet"), toastEl = $("#toast");
 
-  var appEl = document.getElementById("app");
-  var flashEl = document.getElementById("flash");
-  var busyEl = document.getElementById("busy");
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+  const icon = (n) => `<i class="ph-light ph-${n}"></i>`;
+  const pad = (n) => String(n).padStart(2, "0");
+  const iso = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const today = () => iso(new Date());
+  const parse = (s) => { const [y, m, d] = s.split("-"); return new Date(y, m - 1, d); };
+  const addDays = (s, n) => { const d = parse(s); d.setDate(d.getDate() + n); return iso(d); };
+  const fmt = (s, o = { day: "numeric", month: "short" }) => parse(s).toLocaleDateString("it-IT", o);
+  const range = (a) => (a.dal === a.al ? fmt(a.dal) : `${fmt(a.dal)} – ${fmt(a.al)}`);
+  const norm = (s) => String(s || "").trim().replace(/\s+/g, " ").toLowerCase();
+  const title = (s) => norm(s).replace(/(^|[\s'-])\p{L}/gu, (m) => m.toUpperCase());
+  const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
-  function busy(on) {
-    busyEl.classList.toggle("on", !!on);
+  const fullName = (p) => `${p.cognome} ${p.nome}`;
+  const initials = (p) => ((p.nome[0] || "") + (p.cognome[0] || "")).toUpperCase();
+  const byId = (id) => Store.tables.personnel.find((p) => p.id === id);
+  const people = () => [...Store.tables.personnel].sort((a, b) => fullName(a).localeCompare(fullName(b), "it"));
+  const tipo = (a) => TIPI[a.tipo] || TIPI.altro;
+  const actsOn = (pid, d) => Store.tables.absences.filter((a) => a.personId === pid && a.dal <= d && d <= a.al);
+  const upcoming = (pid) => Store.tables.absences.filter((a) => a.personId === pid && a.al >= today()).sort((a, b) => a.dal.localeCompare(b.dal));
+  const statusOf = (pid, d) => { const a = actsOn(pid, d)[0]; return a ? tipo(a) : PRESENTE; };
+
+  async function hash(pw, salt) {
+    const te = new TextEncoder();
+    const key = await crypto.subtle.importKey("raw", te.encode(pw), "PBKDF2", false, ["deriveBits"]);
+    const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt: te.encode(salt), iterations: 100000 }, key, 256);
+    return Array.from(new Uint8Array(bits), (b) => b.toString(16).padStart(2, "0")).join("");
   }
 
-  function flash(msg, type) {
-    if (!msg) {
-      flashEl.innerHTML = "";
+  /* ---------- ui primitives ---------- */
+
+  function toast(msg, bad) {
+    (dlg.open && !dlg.classList.contains("closing") ? dlg : document.body).appendChild(toastEl);
+    toastEl.textContent = msg;
+    toastEl.className = "toast" + (bad ? " bad" : "");
+    void toastEl.offsetWidth;
+    toastEl.classList.add("show");
+    clearTimeout(toast.t);
+    toast.t = setTimeout(() => toastEl.classList.remove("show"), 2600);
+  }
+
+  async function run(btn, fn) {
+    if (btn) { btn.classList.add("loading"); btn.disabled = true; }
+    try { await fn(); } catch (e) { toast(e.message || "Errore", true); }
+    finally { if (btn) { btn.classList.remove("loading"); btn.disabled = false; } }
+  }
+
+  function sheet(html) {
+    $(".sheet-body", dlg).innerHTML = html;
+    if (!dlg.open) dlg.showModal();
+    dlg.scrollTop = 0;
+  }
+
+  function closeSheet() {
+    S.reopen = S.back = null;
+    if (!dlg.open) return;
+    dlg.classList.add("closing");
+    setTimeout(() => { dlg.classList.remove("closing"); dlg.close(); }, 200);
+  }
+
+  /* ---------- views ---------- */
+
+  const loader = `<div class="boot"><div class="crest pulse">${icon("wrench")}</div></div>`;
+
+  const authView = () => `
+    <section class="auth">
+      <div class="crest rise">${icon("wrench")}</div>
+      <span class="eyebrow pill rise" style="--d:1">Hangar 7</span>
+      <h1 class="brand rise" style="--d:2">Squadrone<br><span>Mantenimento</span></h1>
+      <div class="shell rise" style="--d:3">
+        <form class="core form" id="authForm" data-mode="login" novalidate>
+          <div class="seg">
+            <button type="button" class="on" data-act="mode" data-m="login">Accedi</button>
+            <button type="button" data-act="mode" data-m="reg">Registrati</button>
+          </div>
+          <input name="nome" placeholder="Nome" autocomplete="given-name" autocapitalize="words" enterkeyhint="next">
+          <input name="cognome" placeholder="Cognome" autocomplete="family-name" autocapitalize="words" enterkeyhint="next">
+          <div class="pw">
+            <input name="pw" type="password" placeholder="Password" autocomplete="current-password" enterkeyhint="go">
+            <button type="button" data-act="eye" aria-label="Mostra password">${icon("eye")}</button>
+          </div>
+          <button class="cta wide" type="submit"><span>Entra</span><b>${icon("arrow-right")}</b></button>
+        </form>
+      </div>
+    </section>`;
+
+  const header = () => `
+    <header class="top rise">
+      <button class="who" data-act="profile">
+        <span class="av" style="--c:${statusOf(S.me.id, today()).c}">${initials(S.me)}</span>
+        <span><b>${esc(S.me.nome)} ${esc(S.me.cognome)}</b><small>Sq. Mantenimento · H7</small></span>
+      </button>
+      <button class="icon-btn" data-act="refresh" aria-label="Aggiorna">${icon("arrows-clockwise")}</button>
+    </header>`;
+
+  const navView = (v) =>
+    [["oggi", "squares-four", "Oggi"], ["personale", "users-three", "Personale"], ["me", "user", "Io"]]
+      .map(([k, i, l]) => `<button data-act="view" data-v="${k}" class="${v === k ? "on" : ""}">${icon(i)}<span>${l}</span></button>`)
+      .join("") + (v !== "me" ? `<button class="plus" data-act="add" aria-label="Assegna">${icon("plus")}</button>` : "");
+
+  function statusCard(acts, d) {
+    const a = acts[0], t = a ? tipo(a) : PRESENTE;
+    const sub = a ? [a.dal !== a.al ? `fino al ${fmt(a.al, { day: "numeric", month: "long" })}` : "", a.note ? esc(a.note) : ""].filter(Boolean) : [];
+    return `
+      <div class="shell rise" style="--d:1"><div class="core status" style="--c:${t.c}">
+        <div class="eyebrow">Oggi · ${fmt(d, { weekday: "long", day: "numeric", month: "long" })}</div>
+        <div class="st-main"><span class="st-ic">${icon(t.i)}</span><span class="st-l">${t.l}</span></div>
+        ${sub.length ? `<div class="st-sub">${sub.join("<br>")}</div>` : ""}
+      </div></div>`;
+  }
+
+  const actRow = (a, i) => {
+    const t = tipo(a);
+    return `<div class="row rise" style="--d:${Math.min(i, 8) + 4};--c:${t.c}">
+      <span class="tag">${icon(t.i)}</span>
+      <span class="row-t"><b>${t.l}</b><small>${range(a)}</small>${a.note ? `<em>${esc(a.note)}</em>` : ""}</span>
+      <button class="icon-btn sm" data-act="del" data-id="${a.id}" aria-label="Elimina">${icon("x")}</button>
+    </div>`;
+  };
+
+  function meView() {
+    const d = today(), mine = upcoming(S.me.id);
+    return statusCard(actsOn(S.me.id, d), d) +
+      `<button class="cta wide rise" style="--d:2" data-act="add" data-who="${S.me.id}"><span>Nuovo impegno</span><b>${icon("plus")}</b></button>` +
+      (mine.length ? `<h2 class="sec rise" style="--d:3">Prossimi</h2><div class="list">${mine.map(actRow).join("")}</div>` : "");
+  }
+
+  function oggiView() {
+    const d = S.day, all = people(), ass = [], pres = [], counts = {};
+    all.forEach((p) => { const a = actsOn(p.id, d); a.length ? ass.push([p, a]) : pres.push(p); });
+    ass.forEach(([, a]) => (counts[a[0].tipo] = (counts[a[0].tipo] || 0) + 1));
+    const pct = all.length ? Math.round((pres.length / all.length) * 100) : 0;
+    const isToday = d === today();
+
+    const absRows = ass.map(([p, acts], i) => {
+      const a = acts[0], t = tipo(a), notes = acts.map((x) => x.note).filter(Boolean).join(" · ");
+      return `<div class="row tap rise" style="--d:${Math.min(i, 8) + 5};--c:${t.c}" data-act="person" data-id="${p.id}">
+        <span class="tag">${icon(t.i)}</span>
+        <span class="row-t"><b>${esc(fullName(p))}</b><small>${acts.map((x) => tipo(x).l).join(" + ")}${a.dal !== a.al ? " · " + range(a) : ""}</small>${notes ? `<em>${esc(notes)}</em>` : ""}</span>
+      </div>`;
+    }).join("");
+
+    return `
+      <div class="daybar rise">
+        <button class="icon-btn" data-act="day" data-n="-1" aria-label="Giorno prima">${icon("caret-left")}</button>
+        <label class="day-l">
+          <small class="${isToday ? "now" : ""}">${isToday ? "Oggi" : fmt(d, { year: "numeric" })}</small>
+          <span>${fmt(d, { weekday: "long", day: "numeric", month: "long" })}</span>
+          <input type="date" value="${d}" data-change="day" data-act="pick" aria-label="Scegli giorno">
+        </label>
+        <button class="icon-btn" data-act="day" data-n="1" aria-label="Giorno dopo">${icon("caret-right")}</button>
+      </div>
+      <div class="bento">
+        <div class="shell rise" style="--d:1"><div class="core kpi">
+          <div class="eyebrow"><i class="dot" style="--c:var(--ok)"></i>Presenti</div>
+          <div class="num ok">${pres.length}<small>/${all.length}</small></div>
+          <div class="bar"><i style="--p:${pct}%"></i></div>
+        </div></div>
+        <div class="shell rise" style="--d:2"><div class="core kpi">
+          <div class="eyebrow"><i class="dot" style="--c:var(--warn)"></i>Assenti</div>
+          <div class="num warn">${ass.length}</div>
+        </div></div>
+      </div>
+      <div class="chips rise" style="--d:3">
+        ${isToday ? "" : `<button class="chip back" data-act="today">${icon("calendar-dots")}Oggi</button>`}
+        ${Object.keys(TIPI).filter((k) => counts[k]).map((k) => `<span class="chip" style="--c:${TIPI[k].c}">${icon(TIPI[k].i)}${TIPI[k].l}<b>${counts[k]}</b></span>`).join("")}
+      </div>
+      ${ass.length ? `<h2 class="sec rise" style="--d:4">Assenti</h2><div class="list">${absRows}</div>` : ""}
+      ${pres.length ? `<details class="pres rise" style="--d:6"><summary>Presenti<b>${pres.length}</b></summary>
+        <div class="names">${pres.map((p) => `<button data-act="person" data-id="${p.id}">${esc(fullName(p))}</button>`).join("")}</div></details>` : ""}`;
+  }
+
+  function personaleView() {
+    const d = today(), all = people();
+    return `
+      <div class="search rise">${icon("magnifying-glass")}<input type="search" placeholder="Cerca" data-input="q" autocomplete="off"></div>
+      <h2 class="sec rise" style="--d:1">Personale<b>${all.length}</b></h2>
+      <div class="list">${all.map((p, i) => {
+        const s = statusOf(p.id, d);
+        return `<div class="row tap rise" style="--d:${Math.min(i, 8) + 2};--c:${s.c}" data-act="person" data-id="${p.id}" data-name="${esc(norm(fullName(p) + " " + p.nome + " " + p.cognome))}">
+          <span class="av">${initials(p)}</span>
+          <span class="row-t"><b>${esc(fullName(p))}${p.admin ? " " + icon("crown") : ""}</b><small>${s.l}</small></span>
+          ${icon("caret-right")}
+        </div>`;
+      }).join("")}</div>`;
+  }
+
+  function render(anim) {
+    S.me = S.me && byId(S.me.id);
+    app.classList.toggle("anim", !!anim);
+    if (!S.me) {
+      nav.hidden = true;
+      app.innerHTML = authView();
       return;
     }
-    flashEl.innerHTML =
-      '<div class="alert alert-' +
-      (type || "info") +
-      ' alert-dismissible fade show" role="alert">' +
-      esc(msg) +
-      '<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>';
+    const v = S.me.admin ? S.view : "me";
+    app.innerHTML = header() + (v === "oggi" ? oggiView() : v === "personale" ? personaleView() : meView());
+    nav.hidden = !S.me.admin;
+    if (S.me.admin) nav.innerHTML = navView(v);
   }
 
-  function esc(s) {
-    return String(s == null ? "" : s)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
+  /* ---------- sheets ---------- */
+
+  function profileSheet() {
+    S.reopen = null;
+    const me = S.me;
+    sheet(`
+      <div class="sh-head"><span class="av lg" style="--c:${statusOf(me.id, today()).c}">${initials(me)}</span>
+        <div><b>${esc(me.nome)} ${esc(me.cognome)}</b><small>${me.admin ? "Comando" : "Sq. Mantenimento · H7"}</small></div></div>
+      ${me.admin ? "" : `<form id="pinForm" class="pin" novalidate>
+        <input name="pin" type="password" inputmode="numeric" placeholder="PIN comando" autocomplete="off">
+        <button class="icon-btn" type="submit" aria-label="Sblocca">${icon("lock-key")}</button></form>`}
+      <button class="ghost wide" data-act="logout">${icon("sign-out")}<span>Esci</span></button>`);
   }
 
-  function motivoLabel(id) {
-    for (var i = 0; i < MOTIVI.length; i++) {
-      if (MOTIVI[i].id === id) return MOTIVI[i].label;
-    }
-    return id || "—";
+  function personSheet(id) {
+    const p = byId(id);
+    if (!p) return closeSheet();
+    const s = statusOf(id, today()), mine = upcoming(id), self = id === S.me.id;
+    sheet(`
+      <div class="sh-head"><span class="av lg" style="--c:${s.c}">${initials(p)}</span>
+        <div><b>${esc(fullName(p))}</b><small>${s.l}</small></div></div>
+      <button class="cta wide" data-act="add" data-who="${id}"><span>Nuovo impegno</span><b>${icon("plus")}</b></button>
+      ${mine.length ? `<div class="list mt">${mine.map(actRow).join("")}</div>` : ""}
+      <div class="tools">
+        <button data-act="reset" data-id="${id}">${icon("key")}<span>Reset password</span></button>
+        <button data-act="admin" data-id="${id}" class="${p.admin ? "on" : ""}" ${self ? "disabled" : ""}>${icon("crown")}<span>Admin</span></button>
+        <button class="danger" data-act="remove" data-id="${id}" ${self ? "disabled" : ""}>${icon("trash")}<span>Elimina</span></button>
+      </div>`);
+    S.reopen = () => personSheet(id);
   }
 
-  function personName(p) {
-    return (p.cognome || "").toUpperCase() + " " + (p.nome || "");
+  function addSheet(who) {
+    S.back = S.reopen;
+    S.reopen = null;
+    const p = who && byId(who), multi = !p;
+    const d = multi && S.view === "oggi" ? S.day : today();
+    sheet(`
+      <form id="addForm" class="add" novalidate>
+        <h3>${multi ? "Assegna" : p.id === S.me.id ? "Nuovo impegno" : esc(fullName(p))}</h3>
+        ${multi ? `<div class="pick">
+          <label class="chip all"><input type="checkbox" data-change="all">Tutti</label>
+          ${people().map((x) => `<label class="chip"><input type="checkbox" name="p" value="${x.id}">${esc(fullName(x))}</label>`).join("")}
+        </div>` : `<input type="hidden" name="p" value="${p.id}">`}
+        <div class="tipi">${Object.entries(TIPI).map(([k, t]) =>
+          `<label class="tipo" style="--c:${t.c}"><input type="radio" name="tipo" value="${k}">${icon(t.i)}<span>${t.l}</span></label>`).join("")}</div>
+        <div class="dates">
+          <label><small>Dal</small><input type="date" name="dal" value="${d}"></label>
+          <label><small>Al</small><input type="date" name="al" value="${d}" min="${d}"></label>
+        </div>
+        <textarea name="note" rows="2" placeholder="Note"></textarea>
+        <button class="cta wide" type="submit"><span>Salva</span><b>${icon("check")}</b></button>
+      </form>`);
   }
 
-  function sortPeople(list) {
-    return list.slice().sort(function (a, b) {
-      return personName(a).localeCompare(personName(b), "it");
-    });
+  /* ---------- actions ---------- */
+
+  const editPerson = (id, fn, msg) =>
+    Store.mutate("personnel", (l) => { const x = l.find((p) => p.id === id); if (!x) throw new Error("Non trovato"); fn(x); }, msg);
+
+  function afterChange() {
+    render();
+    if (dlg.open && S.reopen) S.reopen();
   }
 
-  function currentDate() {
-    return selectedDate || Store.today();
+  function login(p) {
+    localStorage.setItem(KEY, p.id);
+    S.me = p;
+    S.view = p.admin ? "oggi" : "me";
+    render(true);
   }
 
-  function parseISO(iso) {
-    var p = String(iso).split("-");
-    return new Date(+p[0], +p[1] - 1, +p[2]);
-  }
+  async function doAuth(f) {
+    const nome = title(f.elements.nome.value), cognome = title(f.elements.cognome.value), pw = f.elements.pw.value;
+    if (!nome || !cognome || !pw) throw new Error("Compila tutti i campi");
+    const same = (p) => norm(p.nome) === norm(nome) && norm(p.cognome) === norm(cognome);
+    await Store.loadAll();
 
-  function toISO(d) {
-    var m = String(d.getMonth() + 1).padStart(2, "0");
-    var day = String(d.getDate()).padStart(2, "0");
-    return d.getFullYear() + "-" + m + "-" + day;
-  }
-
-  function formatDateIt(iso) {
-    var p = String(iso).split("-");
-    if (p.length !== 3) return iso;
-    return p[2] + "/" + p[1] + "/" + p[0];
-  }
-
-  function absenceFor(personId, date) {
-    date = date || currentDate();
-    var abs = Store.tables.absences || [];
-    for (var i = 0; i < abs.length; i++) {
-      if (abs[i].personId === personId && abs[i].date === date) return abs[i];
-    }
-    return null;
-  }
-
-  function dashboardData(date) {
-    date = date || currentDate();
-    var people = sortPeople(Store.tables.personnel || []);
-    var presenti = [];
-    var assenti = [];
-    people.forEach(function (p) {
-      var a = absenceFor(p.id, date);
-      if (a) assenti.push({ person: p, absence: a });
-      else presenti.push(p);
-    });
-    return { people: people, presenti: presenti, assenti: assenti, date: date };
-  }
-
-  function daysWithAbsences(ym) {
-    var set = {};
-    (Store.tables.absences || []).forEach(function (a) {
-      if (a.date && a.date.slice(0, 7) === ym) set[a.date] = true;
-    });
-    return set;
-  }
-
-  function calendarHtml(iso, idPrefix) {
-    var sel = parseISO(iso);
-    var y = sel.getFullYear();
-    var m = sel.getMonth();
-    var ym = y + "-" + String(m + 1).padStart(2, "0");
-    var marked = daysWithAbsences(ym);
-    var today = Store.today();
-    var first = new Date(y, m, 1);
-    var startPad = (first.getDay() + 6) % 7; // lunedì=0
-    var daysInMonth = new Date(y, m + 1, 0).getDate();
-    var monthLabel = first.toLocaleDateString("it-IT", {
-      month: "long",
-      year: "numeric"
-    });
-
-    var cells = "";
-    for (var i = 0; i < startPad; i++) cells += '<div class="cal-cell empty"></div>';
-    for (var d = 1; d <= daysInMonth; d++) {
-      var date = toISO(new Date(y, m, d));
-      var cls = "cal-cell";
-      if (date === iso) cls += " selected";
-      if (date === today) cls += " today";
-      if (marked[date]) cls += " has-abs";
-      cells +=
-        '<button type="button" class="' +
-        cls +
-        '" data-date="' +
-        date +
-        '">' +
-        d +
-        "</button>";
+    if (f.dataset.mode === "reg") {
+      const salt = uid(), h = await hash(pw, salt);
+      const p = await Store.mutate("personnel", (l) => {
+        if (l.some(same)) throw new Error("Già registrato: usa Accedi");
+        const p = { id: uid(), nome, cognome, salt, hash: h, createdAt: new Date().toISOString() };
+        l.push(p);
+        return p;
+      }, `registra ${cognome} ${nome}`);
+      return login(p);
     }
 
-    return (
-      '<div class="cal" id="' +
-      idPrefix +
-      'Cal">' +
-      '<div class="cal-nav">' +
-      '<button type="button" class="btn btn-sm btn-outline-secondary" data-cal-nav="-1" aria-label="Mese precedente">‹</button>' +
-      '<span class="cal-month">' +
-      esc(monthLabel) +
-      "</span>" +
-      '<button type="button" class="btn btn-sm btn-outline-secondary" data-cal-nav="1" aria-label="Mese successivo">›</button>' +
-      "</div>" +
-      '<div class="cal-wd">' +
-      WD.map(function (w) {
-        return "<span>" + w + "</span>";
-      }).join("") +
-      "</div>" +
-      '<div class="cal-grid">' +
-      cells +
-      "</div>" +
-      '<p class="cal-hint text-muted mb-0">Giorno selezionato: <strong>' +
-      esc(formatDateIt(iso)) +
-      "</strong> (passato e futuro)</p>" +
-      "</div>"
-    );
+    const p = Store.tables.personnel.find(same);
+    if (!p) throw new Error("Non registrato");
+    if (!p.hash) {
+      // ponytail: primo accesso o password azzerata dal comando → la password digitata diventa quella nuova
+      const salt = uid(), h = await hash(pw, salt);
+      await editPerson(p.id, (x) => { x.salt = salt; x.hash = h; }, `password ${cognome} ${nome}`);
+      toast("Password impostata");
+    } else if ((await hash(pw, p.salt)) !== p.hash) {
+      throw new Error("Password errata");
+    }
+    login(byId(p.id));
   }
 
-  function bindCalendar(idPrefix, onPick) {
-    var root = document.getElementById(idPrefix + "Cal");
-    if (!root) return;
-    root.querySelectorAll("[data-cal-nav]").forEach(function (btn) {
-      btn.addEventListener("click", function () {
-        var delta = +btn.getAttribute("data-cal-nav");
-        var d = parseISO(currentDate());
-        d.setMonth(d.getMonth() + delta);
-        selectedDate = toISO(d);
-        onPick(selectedDate);
+  async function doAdd(f) {
+    const ids = [...f.querySelectorAll("[name=p]")].filter((c) => c.type === "hidden" || c.checked).map((c) => c.value);
+    const t = f.elements.tipo.value, note = f.elements.note.value.trim(), dal = f.elements.dal.value;
+    const al = f.elements.al.value < dal ? dal : f.elements.al.value;
+    if (!ids.length) throw new Error("Scegli chi");
+    if (!t) throw new Error("Scegli il tipo");
+    if (!dal) throw new Error("Scegli la data");
+    if (t === "altro" && !note) throw new Error("Scrivi una nota");
+    if (!S.me.admin && ids.some((id) => id !== S.me.id)) throw new Error("Non autorizzato");
+    const at = new Date().toISOString();
+    await Store.mutate("absences", (l) => {
+      ids.forEach((pid) => l.push({ id: uid(), personId: pid, tipo: t, dal, al, note, by: S.me.id, at }));
+    }, `${TIPI[t].l} ${dal}${al !== dal ? "→" + al : ""} ×${ids.length}`);
+    const back = S.back;
+    render();
+    back ? back() : closeSheet();
+    toast("Salvato");
+  }
+
+  async function doPin(f) {
+    const pin = String(Store.cfg.adminPin || "");
+    if (!pin || f.elements.pin.value.trim() !== pin) throw new Error("PIN errato");
+    await editPerson(S.me.id, (x) => (x.admin = true), `admin ${S.me.cognome}`);
+    closeSheet();
+    S.view = "oggi";
+    render(true);
+    toast("Accesso comando");
+  }
+
+  async function refresh() {
+    await Store.loadAll();
+    S.last = Date.now();
+    afterChange();
+  }
+
+  const ACT = {
+    mode(t) {
+      const f = t.form, reg = t.dataset.m === "reg";
+      f.dataset.mode = t.dataset.m;
+      f.querySelectorAll(".seg button").forEach((b) => b.classList.toggle("on", b === t));
+      $(".cta span", f).textContent = reg ? "Crea account" : "Entra";
+      f.elements.pw.autocomplete = reg ? "new-password" : "current-password";
+    },
+    eye(t) {
+      const i = t.previousElementSibling;
+      i.type = i.type === "password" ? "text" : "password";
+      t.innerHTML = icon(i.type === "password" ? "eye" : "eye-slash");
+    },
+    view(t) { S.view = t.dataset.v; render(true); scrollTo(0, 0); },
+    day(t) { S.day = addDays(S.day, +t.dataset.n); render(true); },
+    today() { S.day = today(); render(true); },
+    pick(t) { if (matchMedia("(pointer: fine)").matches) try { t.showPicker(); } catch (_) {} },
+    refresh: (t) => run(t, refresh),
+    retry: () => boot(),
+    profile: profileSheet,
+    close: closeSheet,
+    add: (t) => addSheet(t.dataset.who),
+    person: (t) => personSheet(t.dataset.id),
+    del: (t) => run(t, async () => {
+      await Store.mutate("absences", (l) => { const i = l.findIndex((a) => a.id === t.dataset.id); if (i >= 0) l.splice(i, 1); }, "elimina impegno");
+      afterChange();
+    }),
+    reset: (t) => run(t, async () => {
+      await editPerson(t.dataset.id, (x) => { delete x.hash; delete x.salt; }, "reset password");
+      toast("Password azzerata: al prossimo accesso ne sceglie una nuova");
+    }),
+    admin: (t) => run(t, async () => {
+      await editPerson(t.dataset.id, (x) => { if (x.admin) delete x.admin; else x.admin = true; }, "ruolo admin");
+      afterChange();
+    }),
+    remove(t) {
+      const p = byId(t.dataset.id);
+      if (!p || !confirm(`Eliminare ${fullName(p)}?`)) return;
+      run(t, async () => {
+        await Store.mutate("personnel", (l) => { const i = l.findIndex((x) => x.id === p.id); if (i >= 0) l.splice(i, 1); }, `elimina ${fullName(p)}`);
+        await Store.mutate("absences", (l) => { for (let i = l.length; i--; ) if (l[i].personId === p.id) l.splice(i, 1); }, `elimina impegni ${fullName(p)}`);
+        closeSheet();
+        render();
       });
-    });
-    root.querySelectorAll(".cal-cell[data-date]").forEach(function (btn) {
-      btn.addEventListener("click", function () {
-        selectedDate = btn.getAttribute("data-date");
-        onPick(selectedDate);
-      });
-    });
-  }
+    },
+    logout() { localStorage.removeItem(KEY); S.me = null; closeSheet(); render(true); }
+  };
 
-  async function ensureData() {
-    busy(true);
-    try {
-      await Store.loadAll(true);
-    } finally {
-      busy(false);
+  document.addEventListener("click", (e) => {
+    const t = e.target.closest("[data-act]");
+    if (t && !t.disabled && ACT[t.dataset.act]) ACT[t.dataset.act](t, e);
+  });
+
+  document.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const f = e.target, fn = { authForm: doAuth, addForm: doAdd, pinForm: doPin }[f.id];
+    if (fn) run(f.querySelector("[type=submit]"), () => fn(f));
+  });
+
+  document.addEventListener("change", (e) => {
+    const t = e.target;
+    if (t.dataset.change === "day" && t.value) { S.day = t.value; render(true); }
+    if (t.dataset.change === "all") t.form.querySelectorAll("[name=p]").forEach((c) => (c.checked = t.checked));
+    if (t.name === "dal" && t.form.id === "addForm") {
+      const al = t.form.elements.al;
+      al.min = t.value;
+      if (al.value < t.value) al.value = t.value;
     }
-  }
+  });
 
-  function route() {
-    var hash = (location.hash || "#/").replace(/^#/, "") || "/";
-    var parts = hash.split("/").filter(Boolean);
-    var page = parts[0] || "home";
-    flash("");
-    if (page === "home") return renderHome();
-    if (page === "personale") return renderPersonale();
-    if (page === "segna") return renderSegna(parts[1]);
-    if (page === "admin") return renderAdmin();
-    renderHome();
-  }
+  document.addEventListener("input", (e) => {
+    if (e.target.dataset.input !== "q") return;
+    const q = norm(e.target.value);
+    app.querySelectorAll("[data-name]").forEach((r) => (r.hidden = !r.dataset.name.includes(q)));
+  });
 
-  function renderHome() {
-    if (!selectedDate) selectedDate = Store.today();
-    document.getElementById("navDate").textContent = formatDateIt(currentDate());
-    appEl.innerHTML =
-      '<div class="text-center mb-3">' +
-      '<h1 class="h3 mb-1" style="color:var(--sq-navy);font-weight:800">Squadrone</h1>' +
-      '<p class="text-muted mb-0">Registro presenza — calendario</p></div>' +
-      '<div class="hero-choice">' +
-      '<a class="choice-card" href="#/personale">' +
-      '<div class="icon"><i class="bi bi-person-badge"></i></div>' +
-      "<h2>Personale</h2>" +
-      '<p class="text-muted mb-0">Registrati e segna presenza / assenze per qualsiasi giorno</p>' +
-      "</a>" +
-      '<a class="choice-card" href="#/admin">' +
-      '<div class="icon"><i class="bi bi-clipboard-data"></i></div>' +
-      "<h2>Comandante</h2>" +
-      '<p class="text-muted mb-0">Presenti / assenti per giorno</p>' +
-      "</a></div>";
-  }
+  dlg.addEventListener("click", (e) => { if (e.target === dlg) closeSheet(); });
+  dlg.addEventListener("close", () => { S.reopen = S.back = null; });
 
-  async function renderPersonale() {
-    appEl.innerHTML = '<div class="panel"><p class="mb-0 text-muted">Caricamento…</p></div>';
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && S.me && Date.now() - S.last > 20000) refresh().catch(() => {});
+  });
+
+  async function boot() {
+    app.innerHTML = loader;
     try {
-      await ensureData();
+      await Store.loadAll();
+      S.last = Date.now();
     } catch (e) {
-      appEl.innerHTML =
-        '<div class="panel"><a class="back-link" href="#/">← Home</a>' +
-        '<p class="text-danger mt-3 mb-0">' +
-        esc(e.message) +
-        "</p></div>";
+      app.innerHTML = `<div class="boot"><div class="crest">${icon("wrench")}</div><p>${esc(e.message)}</p>
+        <button class="ghost" data-act="retry">${icon("arrows-clockwise")}<span>Riprova</span></button></div>`;
       return;
     }
-
-    if (!selectedDate) selectedDate = Store.today();
-    var people = sortPeople(Store.tables.personnel || []);
-    var options =
-      '<option value="">— seleziona —</option>' +
-      people
-        .map(function (p) {
-          return (
-            '<option value="' +
-            esc(p.id) +
-            '">' +
-            esc(personName(p)) +
-            "</option>"
-          );
-        })
-        .join("");
-
-    appEl.innerHTML =
-      '<div class="panel">' +
-      '<a class="back-link" href="#/">← Home</a>' +
-      '<h1 class="h4 mt-2">Personale</h1>' +
-      '<p class="text-muted">Scegli il giorno, poi il nominativo.</p>' +
-      calendarHtml(currentDate(), "pers") +
-      '<label class="form-label mt-3">Già registrato</label>' +
-      '<select id="selPerson" class="form-select mb-3">' +
-      options +
-      "</select>" +
-      '<button class="btn btn-primary w-100 mb-4" id="btnGoSegna" disabled>Segna impegno / presenza</button>' +
-      "<hr>" +
-      '<h2 class="h5">Nuova registrazione</h2>' +
-      '<div class="row g-2">' +
-      '<div class="col-md-6"><label class="form-label">Nome</label>' +
-      '<input id="regNome" class="form-control" autocomplete="given-name"></div>' +
-      '<div class="col-md-6"><label class="form-label">Cognome</label>' +
-      '<input id="regCognome" class="form-control" autocomplete="family-name"></div>' +
-      "</div>" +
-      '<button class="btn btn-outline-primary w-100 mt-3" id="btnRegistra">Registra e continua</button>' +
-      "</div>";
-
-    bindCalendar("pers", function () {
-      document.getElementById("navDate").textContent = formatDateIt(currentDate());
-      renderPersonale();
-    });
-
-    var sel = document.getElementById("selPerson");
-    var btnGo = document.getElementById("btnGoSegna");
-    sel.addEventListener("change", function () {
-      btnGo.disabled = !sel.value;
-    });
-    btnGo.addEventListener("click", function () {
-      location.hash = "#/segna/" + sel.value;
-    });
-    document.getElementById("btnRegistra").addEventListener("click", registerPerson);
+    S.me = byId(localStorage.getItem(KEY)) || null;
+    S.view = S.me && S.me.admin ? "oggi" : "me";
+    S.day = today();
+    render(true);
   }
 
-  async function registerPerson() {
-    var nome = document.getElementById("regNome").value.trim();
-    var cognome = document.getElementById("regCognome").value.trim();
-    if (!nome || !cognome) {
-      flash("Inserisci nome e cognome.", "warning");
-      return;
-    }
-    var dup = (Store.tables.personnel || []).some(function (p) {
-      return (
-        p.nome.toLowerCase() === nome.toLowerCase() &&
-        p.cognome.toLowerCase() === cognome.toLowerCase()
-      );
-    });
-    if (dup) {
-      flash("Nominativo già presente: selezionarlo dall'elenco.", "warning");
-      return;
-    }
-    var person = {
-      id: Store.uid(),
-      nome: nome,
-      cognome: cognome,
-      createdAt: new Date().toISOString()
-    };
-    busy(true);
-    try {
-      Store.tables.personnel.push(person);
-      await Store.commit(["personnel"], "registra " + cognome + " " + nome);
-      flash("Registrato. Ora segna l'impegno o la presenza.", "success");
-      location.hash = "#/segna/" + person.id;
-    } catch (e) {
-      Store.tables.personnel.pop();
-      flash(e.message, "danger");
-    } finally {
-      busy(false);
-    }
-  }
-
-  async function renderSegna(personId) {
-    appEl.innerHTML = '<div class="panel"><p class="mb-0 text-muted">Caricamento…</p></div>';
-    try {
-      await ensureData();
-    } catch (e) {
-      appEl.innerHTML =
-        '<div class="panel"><a class="back-link" href="#/personale">← Indietro</a>' +
-        '<p class="text-danger mt-3 mb-0">' +
-        esc(e.message) +
-        "</p></div>";
-      return;
-    }
-
-    if (!selectedDate) selectedDate = Store.today();
-    var person = (Store.tables.personnel || []).find(function (p) {
-      return p.id === personId;
-    });
-    if (!person) {
-      appEl.innerHTML =
-        '<div class="panel"><a class="back-link" href="#/personale">← Indietro</a>' +
-        '<p class="text-danger mt-3">Nominativo non trovato.</p></div>';
-      return;
-    }
-
-    var day = currentDate();
-    var existing = absenceFor(person.id, day);
-    var selected = existing ? existing.motivo : "presente";
-    var note = existing && existing.note ? existing.note : "";
-
-    var motivoBtns =
-      '<button type="button" class="motivo-btn presente' +
-      (selected === "presente" ? " active" : "") +
-      '" data-motivo="presente">Presente</button>' +
-      MOTIVI.map(function (m) {
-        return (
-          '<button type="button" class="motivo-btn' +
-          (selected === m.id ? " active" : "") +
-          '" data-motivo="' +
-          m.id +
-          '">' +
-          esc(m.label) +
-          "</button>"
-        );
-      }).join("");
-
-    appEl.innerHTML =
-      '<div class="panel">' +
-      '<a class="back-link" href="#/personale">← Indietro</a>' +
-      '<h1 class="h4 mt-2">' +
-      esc(personName(person)) +
-      "</h1>" +
-      '<p class="text-muted mb-2">Scegli il giorno e cosa segnare.</p>' +
-      calendarHtml(day, "segna") +
-      '<div class="motivo-grid mb-3 mt-3" id="motivoGrid">' +
-      motivoBtns +
-      "</div>" +
-      '<div id="noteWrap" class="' +
-      (selected === "altro" || selected === "ritardi" ? "" : "d-none") +
-      '">' +
-      '<label class="form-label">Note / dettaglio</label>' +
-      '<textarea id="noteText" class="form-control" rows="2" placeholder="Es. visita medica, ritardo rientro…">' +
-      esc(note) +
-      "</textarea></div>" +
-      '<button class="btn btn-success w-100 mt-3" id="btnSalvaSegna">Salva per ' +
-      esc(formatDateIt(day)) +
-      "</button>" +
-      "</div>";
-
-    bindCalendar("segna", function () {
-      renderSegna(personId);
-    });
-
-    var current = selected;
-    document.querySelectorAll("#motivoGrid .motivo-btn").forEach(function (btn) {
-      btn.addEventListener("click", function () {
-        current = btn.getAttribute("data-motivo");
-        document.querySelectorAll("#motivoGrid .motivo-btn").forEach(function (b) {
-          b.classList.remove("active");
-        });
-        btn.classList.add("active");
-        var showNote = current === "altro" || current === "ritardi";
-        document.getElementById("noteWrap").classList.toggle("d-none", !showNote);
-      });
-    });
-
-    document.getElementById("btnSalvaSegna").addEventListener("click", async function () {
-      var noteVal = (document.getElementById("noteText").value || "").trim();
-      if (current === "altro" && !noteVal) {
-        flash("Per «Altro» inserisci una nota.", "warning");
-        return;
-      }
-      var daySave = currentDate();
-      busy(true);
-      try {
-        var abs = Store.tables.absences;
-        var idx = -1;
-        for (var i = 0; i < abs.length; i++) {
-          if (abs[i].personId === person.id && abs[i].date === daySave) {
-            idx = i;
-            break;
-          }
-        }
-        if (current === "presente") {
-          if (idx >= 0) abs.splice(idx, 1);
-        } else {
-          var row = {
-            id: idx >= 0 ? abs[idx].id : Store.uid(),
-            personId: person.id,
-            date: daySave,
-            motivo: current,
-            note: noteVal,
-            updatedAt: new Date().toISOString()
-          };
-          if (idx >= 0) abs[idx] = row;
-          else abs.push(row);
-        }
-        await Store.commit(
-          ["absences"],
-          "segna " + person.cognome + " " + daySave + " " +
-            (current === "presente" ? "presente" : current)
-        );
-        flash(
-          current === "presente"
-            ? "Segnato presente per il " + formatDateIt(daySave) + "."
-            : "Assenza salvata (" + formatDateIt(daySave) + "): " + motivoLabel(current),
-          "success"
-        );
-        location.hash = "#/personale";
-      } catch (e) {
-        flash(e.message, "danger");
-        Store.reset();
-        try {
-          await Store.loadAll(true);
-        } catch (_) {}
-      } finally {
-        busy(false);
-      }
-    });
-  }
-
-  async function renderAdmin() {
-    if (!Store.isAdmin()) {
-      appEl.innerHTML =
-        '<div class="panel" style="max-width:420px;margin:0 auto">' +
-        '<a class="back-link" href="#/">← Home</a>' +
-        '<h1 class="h4 mt-2">Accesso comandante</h1>' +
-        '<p class="text-muted">Inserisci il PIN amministratore.</p>' +
-        '<input type="password" id="adminPin" class="form-control mb-3" placeholder="PIN" inputmode="numeric">' +
-        '<button class="btn btn-primary w-100" id="btnAdminLogin">Entra</button></div>';
-      document.getElementById("btnAdminLogin").addEventListener("click", function () {
-        var pin = document.getElementById("adminPin").value.trim();
-        if (pin === Store.cfg.adminPin) {
-          Store.setAdmin(true);
-          renderAdmin();
-        } else {
-          flash("PIN non corretto.", "danger");
-        }
-      });
-      return;
-    }
-
-    appEl.innerHTML = '<div class="panel"><p class="mb-0 text-muted">Caricamento…</p></div>';
-    try {
-      await ensureData();
-    } catch (e) {
-      appEl.innerHTML =
-        '<div class="panel"><a class="back-link" href="#/">← Home</a>' +
-        '<p class="text-danger mt-3 mb-0">' +
-        esc(e.message) +
-        "</p></div>";
-      return;
-    }
-
-    if (!selectedDate) selectedDate = Store.today();
-    var dash = dashboardData(currentDate());
-    var listHtml;
-    if (!dash.assenti.length) {
-      listHtml = '<p class="text-muted mb-0">Nessun assente in questo giorno.</p>';
-    } else {
-      listHtml = dash.assenti
-        .map(function (row) {
-          var detail =
-            row.absence.note && row.absence.note.trim()
-              ? " — " + esc(row.absence.note)
-              : "";
-          return (
-            '<div class="person-row">' +
-            "<div><strong>" +
-            esc(personName(row.person)) +
-            '</strong><div class="small text-muted">' +
-            esc(motivoLabel(row.absence.motivo)) +
-            detail +
-            "</div></div>" +
-            '<span class="badge-motivo">' +
-            esc(motivoLabel(row.absence.motivo)) +
-            "</span></div>"
-          );
-        })
-        .join("");
-    }
-
-    var presentiList = dash.presenti.length
-      ? '<details class="mt-3"><summary class="text-muted">Elenco presenti (' +
-        dash.presenti.length +
-        ")</summary><ul class=\"mt-2 mb-0\">" +
-        dash.presenti
-          .map(function (p) {
-            return "<li>" + esc(personName(p)) + "</li>";
-          })
-          .join("") +
-        "</ul></details>"
-      : "";
-
-    appEl.innerHTML =
-      '<div class="panel">' +
-      '<div class="d-flex justify-content-between align-items-start gap-2">' +
-      '<div><a class="back-link" href="#/">← Home</a>' +
-      '<h1 class="h4 mt-2 mb-0">Pannello comandante</h1>' +
-      '<p class="text-muted mb-0">' +
-      dash.people.length +
-      " in organico</p></div>" +
-      '<button class="btn btn-sm btn-outline-secondary" id="btnLogoutAdmin">Esci</button></div>' +
-      calendarHtml(dash.date, "admin") +
-      '<div class="stat-grid mt-3">' +
-      '<div class="stat presenti"><div class="n">' +
-      dash.presenti.length +
-      '</div><div class="l">Presenti</div></div>' +
-      '<div class="stat assenti"><div class="n">' +
-      dash.assenti.length +
-      '</div><div class="l">Assenti</div></div></div>' +
-      '<h2 class="h5">Assenti — ' +
-      esc(formatDateIt(dash.date)) +
-      "</h2>" +
-      listHtml +
-      presentiList +
-      '<div class="mt-3 d-flex gap-2 flex-wrap">' +
-      '<button class="btn btn-outline-primary btn-sm" id="btnRefresh">Aggiorna</button>' +
-      "</div></div>";
-
-    bindCalendar("admin", function () {
-      renderAdmin();
-    });
-    document.getElementById("btnLogoutAdmin").addEventListener("click", function () {
-      Store.setAdmin(false);
-      location.hash = "#/";
-    });
-    document.getElementById("btnRefresh").addEventListener("click", function () {
-      Store.reset();
-      renderAdmin();
-    });
-  }
-
-  function init() {
-    selectedDate = Store.today();
-    document.getElementById("navDate").textContent = formatDateIt(selectedDate);
-    window.addEventListener("hashchange", route);
-    route();
-  }
-
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init);
-  } else {
-    init();
-  }
+  boot();
 })();
