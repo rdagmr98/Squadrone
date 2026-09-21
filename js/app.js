@@ -1,4 +1,4 @@
-/* Squadrone — registro presenza / assenze (UI italiana, stile corsi/SIEL). */
+/* Squadrone — registro presenza / assenze a calendario (UI italiana). */
 (function () {
   "use strict";
 
@@ -11,6 +11,9 @@
     { id: "ritardi", label: "Ritardi" },
     { id: "altro", label: "Altro / note" }
   ];
+
+  var WD = ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"];
+  var selectedDate = null;
 
   var appEl = document.getElementById("app");
   var flashEl = document.getElementById("flash");
@@ -58,8 +61,29 @@
     });
   }
 
+  function currentDate() {
+    return selectedDate || Store.today();
+  }
+
+  function parseISO(iso) {
+    var p = String(iso).split("-");
+    return new Date(+p[0], +p[1] - 1, +p[2]);
+  }
+
+  function toISO(d) {
+    var m = String(d.getMonth() + 1).padStart(2, "0");
+    var day = String(d.getDate()).padStart(2, "0");
+    return d.getFullYear() + "-" + m + "-" + day;
+  }
+
+  function formatDateIt(iso) {
+    var p = String(iso).split("-");
+    if (p.length !== 3) return iso;
+    return p[2] + "/" + p[1] + "/" + p[0];
+  }
+
   function absenceFor(personId, date) {
-    date = date || Store.today();
+    date = date || currentDate();
     var abs = Store.tables.absences || [];
     for (var i = 0; i < abs.length; i++) {
       if (abs[i].personId === personId && abs[i].date === date) return abs[i];
@@ -68,7 +92,7 @@
   }
 
   function dashboardData(date) {
-    date = date || Store.today();
+    date = date || currentDate();
     var people = sortPeople(Store.tables.personnel || []);
     var presenti = [];
     var assenti = [];
@@ -78,6 +102,93 @@
       else presenti.push(p);
     });
     return { people: people, presenti: presenti, assenti: assenti, date: date };
+  }
+
+  function daysWithAbsences(ym) {
+    var set = {};
+    (Store.tables.absences || []).forEach(function (a) {
+      if (a.date && a.date.slice(0, 7) === ym) set[a.date] = true;
+    });
+    return set;
+  }
+
+  function calendarHtml(iso, idPrefix) {
+    var sel = parseISO(iso);
+    var y = sel.getFullYear();
+    var m = sel.getMonth();
+    var ym = y + "-" + String(m + 1).padStart(2, "0");
+    var marked = daysWithAbsences(ym);
+    var today = Store.today();
+    var first = new Date(y, m, 1);
+    var startPad = (first.getDay() + 6) % 7; // lunedì=0
+    var daysInMonth = new Date(y, m + 1, 0).getDate();
+    var monthLabel = first.toLocaleDateString("it-IT", {
+      month: "long",
+      year: "numeric"
+    });
+
+    var cells = "";
+    for (var i = 0; i < startPad; i++) cells += '<div class="cal-cell empty"></div>';
+    for (var d = 1; d <= daysInMonth; d++) {
+      var date = toISO(new Date(y, m, d));
+      var cls = "cal-cell";
+      if (date === iso) cls += " selected";
+      if (date === today) cls += " today";
+      if (marked[date]) cls += " has-abs";
+      cells +=
+        '<button type="button" class="' +
+        cls +
+        '" data-date="' +
+        date +
+        '">' +
+        d +
+        "</button>";
+    }
+
+    return (
+      '<div class="cal" id="' +
+      idPrefix +
+      'Cal">' +
+      '<div class="cal-nav">' +
+      '<button type="button" class="btn btn-sm btn-outline-secondary" data-cal-nav="-1" aria-label="Mese precedente">‹</button>' +
+      '<span class="cal-month">' +
+      esc(monthLabel) +
+      "</span>" +
+      '<button type="button" class="btn btn-sm btn-outline-secondary" data-cal-nav="1" aria-label="Mese successivo">›</button>' +
+      "</div>" +
+      '<div class="cal-wd">' +
+      WD.map(function (w) {
+        return "<span>" + w + "</span>";
+      }).join("") +
+      "</div>" +
+      '<div class="cal-grid">' +
+      cells +
+      "</div>" +
+      '<p class="cal-hint text-muted mb-0">Giorno selezionato: <strong>' +
+      esc(formatDateIt(iso)) +
+      "</strong> (passato e futuro)</p>" +
+      "</div>"
+    );
+  }
+
+  function bindCalendar(idPrefix, onPick) {
+    var root = document.getElementById(idPrefix + "Cal");
+    if (!root) return;
+    root.querySelectorAll("[data-cal-nav]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var delta = +btn.getAttribute("data-cal-nav");
+        var d = parseISO(currentDate());
+        d.setMonth(d.getMonth() + delta);
+        selectedDate = toISO(d);
+        onPick(selectedDate);
+      });
+    });
+    root.querySelectorAll(".cal-cell[data-date]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        selectedDate = btn.getAttribute("data-date");
+        onPick(selectedDate);
+      });
+    });
   }
 
   async function ensureData() {
@@ -102,30 +213,23 @@
   }
 
   function renderHome() {
-    document.getElementById("navDate").textContent = formatDateIt(Store.today());
+    if (!selectedDate) selectedDate = Store.today();
+    document.getElementById("navDate").textContent = formatDateIt(currentDate());
     appEl.innerHTML =
       '<div class="text-center mb-3">' +
-      "<h1 class=\"h3 mb-1\" style=\"color:var(--sq-navy);font-weight:800\">Squadrone</h1>" +
-      '<p class="text-muted mb-0">Registro presenza — ' +
-      esc(formatDateIt(Store.today())) +
-      "</p></div>" +
+      '<h1 class="h3 mb-1" style="color:var(--sq-navy);font-weight:800">Squadrone</h1>' +
+      '<p class="text-muted mb-0">Registro presenza — calendario</p></div>' +
       '<div class="hero-choice">' +
       '<a class="choice-card" href="#/personale">' +
       '<div class="icon"><i class="bi bi-person-badge"></i></div>' +
       "<h2>Personale</h2>" +
-      "<p class=\"text-muted mb-0\">Registrati e segna licenze, guardia, impegni</p>" +
+      '<p class="text-muted mb-0">Registrati e segna presenza / assenze per qualsiasi giorno</p>' +
       "</a>" +
       '<a class="choice-card" href="#/admin">' +
       '<div class="icon"><i class="bi bi-clipboard-data"></i></div>' +
       "<h2>Comandante</h2>" +
-      "<p class=\"text-muted mb-0\">Presenti / assenti e motivi</p>" +
+      '<p class="text-muted mb-0">Presenti / assenti per giorno</p>' +
       "</a></div>";
-  }
-
-  function formatDateIt(iso) {
-    var p = String(iso).split("-");
-    if (p.length !== 3) return iso;
-    return p[2] + "/" + p[1] + "/" + p[0];
   }
 
   async function renderPersonale() {
@@ -141,6 +245,7 @@
       return;
     }
 
+    if (!selectedDate) selectedDate = Store.today();
     var people = sortPeople(Store.tables.personnel || []);
     var options =
       '<option value="">— seleziona —</option>' +
@@ -160,8 +265,9 @@
       '<div class="panel">' +
       '<a class="back-link" href="#/">← Home</a>' +
       '<h1 class="h4 mt-2">Personale</h1>' +
-      '<p class="text-muted">Scegli il tuo nominativo oppure registrati.</p>' +
-      '<label class="form-label">Già registrato</label>' +
+      '<p class="text-muted">Scegli il giorno, poi il nominativo.</p>' +
+      calendarHtml(currentDate(), "pers") +
+      '<label class="form-label mt-3">Già registrato</label>' +
       '<select id="selPerson" class="form-select mb-3">' +
       options +
       "</select>" +
@@ -176,6 +282,11 @@
       "</div>" +
       '<button class="btn btn-outline-primary w-100 mt-3" id="btnRegistra">Registra e continua</button>' +
       "</div>";
+
+    bindCalendar("pers", function () {
+      document.getElementById("navDate").textContent = formatDateIt(currentDate());
+      renderPersonale();
+    });
 
     var sel = document.getElementById("selPerson");
     var btnGo = document.getElementById("btnGoSegna");
@@ -238,6 +349,7 @@
       return;
     }
 
+    if (!selectedDate) selectedDate = Store.today();
     var person = (Store.tables.personnel || []).find(function (p) {
       return p.id === personId;
     });
@@ -248,7 +360,8 @@
       return;
     }
 
-    var existing = absenceFor(person.id);
+    var day = currentDate();
+    var existing = absenceFor(person.id, day);
     var selected = existing ? existing.motivo : "presente";
     var note = existing && existing.note ? existing.note : "";
 
@@ -274,10 +387,9 @@
       '<h1 class="h4 mt-2">' +
       esc(personName(person)) +
       "</h1>" +
-      '<p class="text-muted">Giorno ' +
-      esc(formatDateIt(Store.today())) +
-      " — cosa segnare?</p>" +
-      '<div class="motivo-grid mb-3" id="motivoGrid">' +
+      '<p class="text-muted mb-2">Scegli il giorno e cosa segnare.</p>' +
+      calendarHtml(day, "segna") +
+      '<div class="motivo-grid mb-3 mt-3" id="motivoGrid">' +
       motivoBtns +
       "</div>" +
       '<div id="noteWrap" class="' +
@@ -287,8 +399,14 @@
       '<textarea id="noteText" class="form-control" rows="2" placeholder="Es. visita medica, ritardo rientro…">' +
       esc(note) +
       "</textarea></div>" +
-      '<button class="btn btn-success w-100 mt-3" id="btnSalvaSegna">Salva</button>' +
+      '<button class="btn btn-success w-100 mt-3" id="btnSalvaSegna">Salva per ' +
+      esc(formatDateIt(day)) +
+      "</button>" +
       "</div>";
+
+    bindCalendar("segna", function () {
+      renderSegna(personId);
+    });
 
     var current = selected;
     document.querySelectorAll("#motivoGrid .motivo-btn").forEach(function (btn) {
@@ -309,12 +427,13 @@
         flash("Per «Altro» inserisci una nota.", "warning");
         return;
       }
+      var daySave = currentDate();
       busy(true);
       try {
         var abs = Store.tables.absences;
         var idx = -1;
         for (var i = 0; i < abs.length; i++) {
-          if (abs[i].personId === person.id && abs[i].date === Store.today()) {
+          if (abs[i].personId === person.id && abs[i].date === daySave) {
             idx = i;
             break;
           }
@@ -325,7 +444,7 @@
           var row = {
             id: idx >= 0 ? abs[idx].id : Store.uid(),
             personId: person.id,
-            date: Store.today(),
+            date: daySave,
             motivo: current,
             note: noteVal,
             updatedAt: new Date().toISOString()
@@ -335,12 +454,13 @@
         }
         await Store.commit(
           ["absences"],
-          "segna " + person.cognome + " " + (current === "presente" ? "presente" : current)
+          "segna " + person.cognome + " " + daySave + " " +
+            (current === "presente" ? "presente" : current)
         );
         flash(
           current === "presente"
-            ? "Segnato presente."
-            : "Assenza salvata: " + motivoLabel(current),
+            ? "Segnato presente per il " + formatDateIt(daySave) + "."
+            : "Assenza salvata (" + formatDateIt(daySave) + "): " + motivoLabel(current),
           "success"
         );
         location.hash = "#/personale";
@@ -389,10 +509,11 @@
       return;
     }
 
-    var dash = dashboardData();
+    if (!selectedDate) selectedDate = Store.today();
+    var dash = dashboardData(currentDate());
     var listHtml;
     if (!dash.assenti.length) {
-      listHtml = '<p class="text-muted mb-0">Nessun assente oggi.</p>';
+      listHtml = '<p class="text-muted mb-0">Nessun assente in questo giorno.</p>';
     } else {
       listHtml = dash.assenti
         .map(function (row) {
@@ -434,11 +555,10 @@
       '<div><a class="back-link" href="#/">← Home</a>' +
       '<h1 class="h4 mt-2 mb-0">Pannello comandante</h1>' +
       '<p class="text-muted mb-0">' +
-      esc(formatDateIt(dash.date)) +
-      " · " +
       dash.people.length +
       " in organico</p></div>" +
       '<button class="btn btn-sm btn-outline-secondary" id="btnLogoutAdmin">Esci</button></div>' +
+      calendarHtml(dash.date, "admin") +
       '<div class="stat-grid mt-3">' +
       '<div class="stat presenti"><div class="n">' +
       dash.presenti.length +
@@ -446,13 +566,18 @@
       '<div class="stat assenti"><div class="n">' +
       dash.assenti.length +
       '</div><div class="l">Assenti</div></div></div>' +
-      "<h2 class=\"h5\">Assenti e motivo</h2>" +
+      '<h2 class="h5">Assenti — ' +
+      esc(formatDateIt(dash.date)) +
+      "</h2>" +
       listHtml +
       presentiList +
       '<div class="mt-3 d-flex gap-2 flex-wrap">' +
       '<button class="btn btn-outline-primary btn-sm" id="btnRefresh">Aggiorna</button>' +
       "</div></div>";
 
+    bindCalendar("admin", function () {
+      renderAdmin();
+    });
     document.getElementById("btnLogoutAdmin").addEventListener("click", function () {
       Store.setAdmin(false);
       location.hash = "#/";
@@ -464,7 +589,8 @@
   }
 
   function init() {
-    document.getElementById("navDate").textContent = formatDateIt(Store.today());
+    selectedDate = Store.today();
+    document.getElementById("navDate").textContent = formatDateIt(selectedDate);
     window.addEventListener("hashchange", route);
     route();
   }
