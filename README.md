@@ -22,6 +22,6 @@ Come SIEL/AVES:
 
 ## Deploy
 
-Ogni push su `main` pubblica su GitHub Pages (workflow come SIEL).
+Pages è attivo su `main` (root) con `.nojekyll` — URL: `https://rdagmr98.github.io/Squadrone/`
 
-Pages URL tipica: `https://rdagmr98.github.io/Squadrone/`
+Il workflow Actions è in `tool/pages.yml.disabled` (il token `gh` attuale non ha scope `workflow`). Per ripristinarlo: `gh auth refresh -s workflow`, poi spostare il file in `.github/workflows/pages.yml` e passare Pages a “GitHub Actions”.
