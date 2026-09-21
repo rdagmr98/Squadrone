@@ -1,0 +1,13 @@
+# Dependencies
+node_modules/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Local secrets (never commit real tokens)
+js/config.local.js
+.env
+*.pem

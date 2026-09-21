@@ -1,0 +1,58 @@
+name: Deploy Squadrone su GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Opzionale: inietta PAT di scrittura (come READ_PAT su corsi/AVES).
+      # Secret: SQUADRONE_PAT — Fine-Grained con Contents R/W su squarone-data.
+      - name: Inject config PAT
+        env:
+          SQUADRONE_PAT: ${{ secrets.SQUADRONE_PAT }}
+        run: |
+          if [ -n "$SQUADRONE_PAT" ]; then
+            python3 - <<'PY'
+          import json, os, pathlib
+          pat = os.environ.get("SQUADRONE_PAT", "")
+          cfg = {
+            "owner": "rdagmr98",
+            "repo": "squadrone-data",
+            "branch": "main",
+            "pat": pat,
+            "adminPin": "0000",
+          }
+          pathlib.Path("js/config.js").write_text(
+              "window.SQUADRONE_CONFIG = " + json.dumps(cfg, indent=2) + ";\n",
+              encoding="utf-8",
+          )
+          print("config.js written with injected PAT")
+          PY
+          else
+            echo "No SQUADRONE_PAT secret — users will set PAT from Impostazioni"
+          fi
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'
+      - id: deployment
+        uses: actions/deploy-pages@v4
