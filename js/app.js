@@ -257,9 +257,14 @@
     sheet(`
       <form id="addForm" class="add" novalidate>
         <h3>${multi ? "Assegna" : p.id === S.me.id ? "Nuovo impegno" : esc(fullName(p))}</h3>
-        ${multi ? `<div class="pick">
-          <label class="chip all"><input type="checkbox" data-change="all">Tutti</label>
-          ${people().map((x) => `<label class="chip"><input type="checkbox" name="p" value="${x.id}">${esc(fullName(x))}</label>`).join("")}
+        ${multi ? `<div class="chi">
+          <button type="button" class="chi-btn" data-act="chi">${icon("users-three")}<span class="chi-l">Chi</span><b class="chi-n"></b>${icon("caret-down")}</button>
+          <div class="chi-pane">
+            <div class="search">${icon("magnifying-glass")}<input type="search" placeholder="Cerca" data-input="q" autocomplete="off"></div>
+            <label class="chi-r all" data-name=""><input type="checkbox" data-change="all"><span class="av">${icon("users-three")}</span><span>Tutti</span>${icon("check")}</label>
+            <div class="chi-list">${people().map((x) => `<label class="chi-r" data-name="${esc(norm(fullName(x) + " " + x.nome + " " + x.cognome))}">
+              <input type="checkbox" name="p" value="${x.id}"><span class="av">${initials(x)}</span><span>${esc(fullName(x))}</span>${icon("check")}</label>`).join("")}</div>
+          </div>
         </div>` : `<input type="hidden" name="p" value="${p.id}">`}
         <div class="tipi">${Object.entries(TIPI).map(([k, t]) =>
           `<label class="tipo" style="--c:${t.c}"><input type="radio" name="tipo" value="${k}">${icon(t.i)}<span>${t.l}</span></label>`).join("")}</div>
@@ -270,6 +275,16 @@
         <textarea name="note" rows="2" placeholder="Note"></textarea>
         <button class="cta wide" type="submit"><span>Salva</span><b>${icon("check")}</b></button>
       </form>`);
+  }
+
+  // Etichetta del campo "Chi": primi 2 cognomi + contatore, "Tutti" se tutti
+  function chiSync(w) {
+    const c = [...w.querySelectorAll("[name=p]")], on = c.filter((x) => x.checked);
+    w.querySelector("[data-change=all]").checked = on.length === c.length;
+    w.querySelector(".chi-l").textContent = !on.length ? "Chi" : on.length === c.length ? "Tutti"
+      : on.slice(0, 2).map((x) => { const p = byId(x.value); return `${p.cognome} ${p.nome[0] || ""}.`; }).join(", ");
+    w.querySelector(".chi-n").textContent = on.length || "";
+    w.classList.toggle("set", on.length > 0);
   }
 
   /* ---------- actions ---------- */
@@ -323,7 +338,7 @@
     const ids = [...f.querySelectorAll("[name=p]")].filter((c) => c.type === "hidden" || c.checked).map((c) => c.value);
     const t = f.elements.tipo.value, note = f.elements.note.value.trim(), dal = f.elements.dal.value;
     const al = f.elements.al.value < dal ? dal : f.elements.al.value;
-    if (!ids.length) throw new Error("Scegli chi");
+    if (!ids.length) { f.querySelector(".chi")?.classList.add("open"); throw new Error("Scegli chi"); }
     if (!t) throw new Error("Scegli il tipo");
     if (!dal) throw new Error("Scegli la data");
     if (t === "altro" && !note) throw new Error("Scrivi una nota");
@@ -371,6 +386,7 @@
     day(t) { S.day = addDays(S.day, +t.dataset.n); render(true); },
     today() { S.day = today(); render(true); },
     pick(t) { if (matchMedia("(pointer: fine)").matches) try { t.showPicker(); } catch (_) {} },
+    chi(t) { t.parentNode.classList.toggle("open"); },
     refresh: (t) => run(t, refresh),
     retry: () => boot(),
     profile: profileSheet,
@@ -417,6 +433,7 @@
     const t = e.target;
     if (t.dataset.change === "day" && t.value) { S.day = t.value; render(true); }
     if (t.dataset.change === "all") t.form.querySelectorAll("[name=p]").forEach((c) => (c.checked = t.checked));
+    if (t.closest(".chi")) chiSync(t.closest(".chi"));
     if (t.name === "dal" && t.form.id === "addForm") {
       const al = t.form.elements.al;
       al.min = t.value;
@@ -427,7 +444,7 @@
   document.addEventListener("input", (e) => {
     if (e.target.dataset.input !== "q") return;
     const q = norm(e.target.value);
-    app.querySelectorAll("[data-name]").forEach((r) => (r.hidden = !r.dataset.name.includes(q)));
+    (e.target.closest(".chi") || app).querySelectorAll("[data-name]").forEach((r) => (r.hidden = !r.dataset.name.includes(q)));
   });
 
   dlg.addEventListener("click", (e) => { if (e.target === dlg) closeSheet(); });
