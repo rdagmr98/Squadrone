@@ -33,13 +33,14 @@
     }
   };
 
-  function headers() {
-    return {
+  function headers(write) {
+    var h = {
       Authorization: "Bearer " + cfg.pat,
       Accept: "application/vnd.github+json",
-      "Content-Type": "application/json",
       "X-GitHub-Api-Version": "2022-11-28"
     };
+    if (write) h["Content-Type"] = "application/json";
+    return h;
   }
 
   function rawHeaders() {
@@ -152,7 +153,7 @@
 
     var tRes = await fetch(ghBase() + "/git/trees", {
       method: "POST",
-      headers: headers(),
+      headers: headers(true),
       body: JSON.stringify({ base_tree: baseTree, tree: treeItems })
     });
     if (!tRes.ok) throw new Error(await errMsg(tRes, "Creazione tree fallita"));
@@ -161,9 +162,20 @@
     // ponytail: niente commit vuoto → evita 422 inutili
     if (newTree === baseTree) return baseSha;
 
+    // Ri-leggi tip subito prima del commit (riduce race → 422 non-ff)
+    var tipRes = await fetch(refUrl, { headers: headers() });
+    if (tipRes.ok) {
+      var tipSha = (await tipRes.json()).object.sha;
+      if (tipSha !== baseSha) {
+        var race = new Error("Tip spostato durante scrittura");
+        race.status = 422;
+        throw race;
+      }
+    }
+
     var commitRes = await fetch(ghBase() + "/git/commits", {
       method: "POST",
-      headers: headers(),
+      headers: headers(true),
       body: JSON.stringify({
         message: message || "update Squadrone data",
         tree: newTree,
@@ -179,7 +191,7 @@
       ghBase() + "/git/refs/heads/" + encodeURIComponent(cfg.branch),
       {
         method: "PATCH",
-        headers: headers(),
+        headers: headers(true),
         body: JSON.stringify({ sha: newCommit, force: false })
       }
     );
@@ -199,7 +211,7 @@
     if (!names.length) return;
 
     var lastErr;
-    for (var attempt = 0; attempt < 3; attempt++) {
+    for (var attempt = 0; attempt < 5; attempt++) {
       try {
         return await commitOnce(names, message);
       } catch (e) {
@@ -207,7 +219,7 @@
         // 409/422 = tip spostato (race) → riprova con SHA fresco
         if (e.status !== 409 && e.status !== 422) throw e;
         await new Promise(function (r) {
-          setTimeout(r, 200 * (attempt + 1));
+          setTimeout(r, 250 * (attempt + 1));
         });
       }
     }
