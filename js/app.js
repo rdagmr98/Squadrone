@@ -82,10 +82,6 @@
   }
 
   async function ensureData() {
-    if (!Store.hasPat()) {
-      openSettings("Inserisci il PAT per collegare squadrone-data.");
-      throw new Error("PAT mancante");
-    }
     busy(true);
     try {
       await Store.loadAll(true);
@@ -468,57 +464,7 @@
     });
   }
 
-  function openSettings(msg) {
-    document.getElementById("set_pat").value = localStorage.getItem(Store.LS.pat) || "";
-    document.getElementById("set_owner").value = Store.cfg.owner;
-    document.getElementById("set_repo").value = Store.cfg.repo;
-    document.getElementById("set_branch").value = Store.cfg.branch;
-    document.getElementById("set_err").textContent = msg || "";
-    document.getElementById("set_ok").textContent = "";
-    settingsModal.show();
-  }
-
-  async function saveSettings() {
-    var pat = document.getElementById("set_pat").value.trim();
-    var owner = document.getElementById("set_owner").value.trim() || "rdagmr98";
-    var repo = document.getElementById("set_repo").value.trim() || "squadrone-data";
-    var branch = document.getElementById("set_branch").value.trim() || "main";
-    var err = document.getElementById("set_err");
-    var ok = document.getElementById("set_ok");
-    err.textContent = "";
-    ok.textContent = "";
-
-    Store.cfg.pat = pat;
-    Store.cfg.owner = owner;
-    Store.cfg.repo = repo;
-    Store.cfg.branch = branch;
-    Store.reset();
-
-    if (!Store.hasPat()) {
-      err.textContent = "Inserisci un PAT con Contents Read/Write su squadrone-data.";
-      return;
-    }
-    busy(true);
-    try {
-      await Store.loadAll(true);
-      ok.textContent = "Connessione OK — " + Store.tables.personnel.length + " in organico.";
-      setTimeout(function () {
-        settingsModal.hide();
-        route();
-      }, 600);
-    } catch (e) {
-      err.textContent = e.message;
-    } finally {
-      busy(false);
-    }
-  }
-
   function init() {
-    settingsModal = new bootstrap.Modal(document.getElementById("settingsModal"));
-    document.getElementById("btnSettings").addEventListener("click", function () {
-      openSettings();
-    });
-    document.getElementById("set_save").addEventListener("click", saveSettings);
     document.getElementById("navDate").textContent = formatDateIt(Store.today());
     window.addEventListener("hashchange", route);
     route();
