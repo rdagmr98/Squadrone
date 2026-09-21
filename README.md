@@ -2,26 +2,21 @@
 
 Registro presenza/assenze per lo squadrone (personale AMI).
 
-## Architettura (come SIEL / AVES / corsi)
+## Architettura (come corsi SMAM / AVES)
 
-- **Frontend** (questo repo): HTML/JS statico su **GitHub Pages**
-- **Backend dati**: repo separato [`squadrone-data`](https://github.com/rdagmr98/squadrone-data) — JSON via GitHub Contents / Git Data API
+- **Frontend** (questo repo): HTML/JS su **GitHub Pages**
+- **Backend dati**: [`squadrone-data`](https://github.com/rdagmr98/squadrone-data) — JSON via GitHub API
+- **PAT**: secret Actions `READ_PAT` iniettato in `config.js` al deploy (come `--dart-define=READ_PAT` su corsi). Gli utenti **non** inseriscono token.
 
 ## Flussi
 
-1. **Personale** — registrazione nome+cognome; segna presente oppure assenza (licenze, guardia, polveriera, 72° stormo, ritardi, altro/note).
+1. **Personale** — registrazione nome+cognome; presente oppure assenza: licenze, guardia, polveriera, 72° stormo, Hangar 7, ritardi, altro/note.
 2. **Comandante** — PIN admin (default `1234` in `squadrone-data/config.json`); dashboard presenti/assenti + motivo.
 
-## Setup PAT
+## Setup (una tantum, come corsi)
 
-Come SIEL/AVES:
+1. Fine-Grained PAT con **Contents: Read and write** su `squadrone-data`.
+2. Repo Squadrone → Settings → Secrets → Actions → `READ_PAT`.
+3. Push su `main` → Actions pubblica Pages.
 
-1. Crea un Fine-Grained PAT con **Contents: Read and write** solo su `squadrone-data`.
-2. Opzione A — secret Actions `SQUADRONE_PAT` su questo repo (iniettato in `config.js` al deploy, come `READ_PAT` su corsi).
-3. Opzione B — Impostazioni (ingranaggio) nell'app: il token resta in `localStorage`.
-
-## Deploy
-
-Pages è attivo su `main` (root) con `.nojekyll` — URL: `https://rdagmr98.github.io/Squadrone/`
-
-Il workflow Actions è in `tool/pages.yml.disabled` (il token `gh` attuale non ha scope `workflow`). Per ripristinarlo: `gh auth refresh -s workflow`, poi spostare il file in `.github/workflows/pages.yml` e passare Pages a “GitHub Actions”.
+URL: `https://rdagmr98.github.io/Squadrone/`

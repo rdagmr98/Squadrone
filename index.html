@@ -13,62 +13,13 @@
   <nav class="navbar navbar-dark mb-3">
     <div class="container-fluid">
       <a class="navbar-brand" href="#/">SQUADRONE</a>
-      <div class="d-flex gap-2 align-items-center">
-        <span id="navDate" class="text-white-50 small d-none d-sm-inline"></span>
-        <button class="btn btn-sm btn-outline-light" id="btnSettings" title="Impostazioni">
-          <i class="bi bi-gear"></i>
-        </button>
-      </div>
+      <span id="navDate" class="text-white-50 small"></span>
     </div>
   </nav>
 
   <div class="container pb-5">
     <div id="flash"></div>
     <div id="app"></div>
-  </div>
-
-  <!-- Impostazioni PAT -->
-  <div class="modal fade" id="settingsModal" tabindex="-1">
-    <div class="modal-dialog">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title">Impostazioni accesso dati</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-        </div>
-        <div class="modal-body">
-          <p class="small text-muted mb-3">
-            I dati stanno nel repository <code>squadrone-data</code> su GitHub
-            (Contents API), come SIEL/AVES/corsi. Il token resta solo in questo
-            browser (<code>localStorage</code>), mai nel codice. Se il deploy
-            ha iniettato un PAT via Actions, puoi lasciarlo vuoto.
-          </p>
-          <div class="mb-2">
-            <label class="form-label">Personal Access Token</label>
-            <input type="password" id="set_pat" class="form-control form-control-sm" placeholder="ghp_… / github_pat_…">
-          </div>
-          <div class="row g-2">
-            <div class="col-4">
-              <label class="form-label">Owner</label>
-              <input type="text" id="set_owner" class="form-control form-control-sm">
-            </div>
-            <div class="col-4">
-              <label class="form-label">Repo dati</label>
-              <input type="text" id="set_repo" class="form-control form-control-sm">
-            </div>
-            <div class="col-4">
-              <label class="form-label">Branch</label>
-              <input type="text" id="set_branch" class="form-control form-control-sm">
-            </div>
-          </div>
-          <div id="set_err" class="text-danger small mt-2"></div>
-          <div id="set_ok" class="text-success small mt-2"></div>
-        </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Chiudi</button>
-          <button type="button" class="btn btn-primary" id="set_save">Salva e ricarica</button>
-        </div>
-      </div>
-    </div>
   </div>
 
   <div id="busy"><div class="spinner-border text-primary" role="status"></div></div>

@@ -1,5 +1,5 @@
-/* Injected optionally by GitHub Actions from secret SQUADRONE_PAT.
-   Leave empty for local use; configure PAT from Impostazioni (SIEL style). */
+/* PAT iniettato al deploy da Actions (secret READ_PAT), come corsi SMAM.
+   Gli utenti NON inseriscono alcun token. */
 window.SQUADRONE_CONFIG = {
   owner: "rdagmr98",
   repo: "squadrone-data",

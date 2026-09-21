@@ -1,61 +1,51 @@
-/* Layer dati: JSON su repo squarone-data via GitHub Contents / Git Data API.
-   Stesso pattern di SIEL (store.js) e AVES/corsi (GhDbService). */
+/* Layer dati: JSON su squarone-data via GitHub API.
+   PAT solo da config.js (iniettato al build come READ_PAT su corsi). */
 (function (global) {
   "use strict";
 
   var API = "https://api.github.com";
-  var LS = {
-    pat: "squadrone_pat",
-    owner: "squadrone_owner",
-    repo: "squadrone_data_repo",
-    branch: "squadrone_branch",
-    admin: "squadrone_admin_ok"
-  };
+  var LS = { admin: "squadrone_admin_ok" };
 
   var TABLES = ["personnel", "absences", "config"];
   var baked = global.SQUADRONE_CONFIG || {};
 
+  var tables = {
+    personnel: [],
+    absences: [],
+    config: { adminPin: "1234", title: "Squadrone" }
+  };
+  var loaded = false;
+
   var cfg = {
     get pat() {
-      return localStorage.getItem(LS.pat) || baked.pat || "";
-    },
-    set pat(v) {
-      if (v) localStorage.setItem(LS.pat, v);
-      else localStorage.removeItem(LS.pat);
+      return (baked.pat || "").trim();
     },
     get owner() {
-      return localStorage.getItem(LS.owner) || baked.owner || "rdagmr98";
-    },
-    set owner(v) {
-      localStorage.setItem(LS.owner, v || "rdagmr98");
+      return baked.owner || "rdagmr98";
     },
     get repo() {
-      return localStorage.getItem(LS.repo) || baked.repo || "squadrone-data";
-    },
-    set repo(v) {
-      localStorage.setItem(LS.repo, v || "squadrone-data");
+      return baked.repo || "squadrone-data";
     },
     get branch() {
-      return localStorage.getItem(LS.branch) || baked.branch || "main";
-    },
-    set branch(v) {
-      localStorage.setItem(LS.branch, v || "main");
+      return baked.branch || "main";
     },
     get adminPin() {
       var remote = tables.config;
-      if (remote && typeof remote === "object" && !Array.isArray(remote) && remote.adminPin) {
+      if (
+        remote &&
+        typeof remote === "object" &&
+        !Array.isArray(remote) &&
+        remote.adminPin
+      ) {
         return String(remote.adminPin);
       }
       return baked.adminPin || "1234";
     }
   };
 
-  var tables = { personnel: [], absences: [], config: { adminPin: "1234", title: "Squadrone" } };
-  var loaded = false;
-
   function headers(accept) {
     return {
-      Authorization: "token " + cfg.pat,
+      Authorization: "Bearer " + cfg.pat,
       Accept: accept || "application/vnd.github+json",
       "X-GitHub-Api-Version": "2022-11-28"
     };
@@ -83,13 +73,9 @@
     if (res.status === 404) return emptyFor(name);
     if (res.status === 401 || res.status === 403) {
       throw new Error(
-        "Token non valido o senza accesso a " +
-          cfg.owner +
-          "/" +
-          cfg.repo +
-          " (HTTP " +
+        "Accesso dati non configurato (HTTP " +
           res.status +
-          ")"
+          "). Serve READ_PAT nel deploy Actions, come su corsi."
       );
     }
     if (!res.ok) {
@@ -108,7 +94,7 @@
     if (loaded && !force) return tables;
     if (!cfg.pat) {
       throw new Error(
-        "Token mancante: apri Impostazioni e inserisci il PAT, oppure configura il secret SQUADRONE_PAT sul deploy."
+        "Deploy incompleto: manca il secret READ_PAT (stesso schema di corsi SMAM)."
       );
     }
     var results = await Promise.all(TABLES.map(readTable));
@@ -120,7 +106,7 @@
   }
 
   async function commit(names, message) {
-    if (!cfg.pat) throw new Error("Token mancante.");
+    if (!cfg.pat) throw new Error("Token deploy mancante.");
     names = (names || []).filter(function (n, i, a) {
       return a.indexOf(n) === i;
     });
@@ -186,10 +172,7 @@
   }
 
   function uid() {
-    return (
-      Date.now().toString(36) +
-      Math.random().toString(36).slice(2, 8)
-    );
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   }
 
   function today() {
