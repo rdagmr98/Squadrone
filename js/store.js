@@ -12,7 +12,7 @@
     admin: "squadrone_admin_ok"
   };
 
-  var TABLES = ["personnel", "absences"];
+  var TABLES = ["personnel", "absences", "config"];
   var baked = global.SQUADRONE_CONFIG || {};
 
   var cfg = {
@@ -42,11 +42,15 @@
       localStorage.setItem(LS.branch, v || "main");
     },
     get adminPin() {
-      return baked.adminPin || "0000";
+      var remote = tables.config;
+      if (remote && typeof remote === "object" && !Array.isArray(remote) && remote.adminPin) {
+        return String(remote.adminPin);
+      }
+      return baked.adminPin || "1234";
     }
   };
 
-  var tables = { personnel: [], absences: [] };
+  var tables = { personnel: [], absences: [], config: { adminPin: "1234", title: "Squadrone" } };
   var loaded = false;
 
   function headers(accept) {
@@ -61,17 +65,22 @@
     return API + "/repos/" + cfg.owner + "/" + cfg.repo;
   }
 
+  function emptyFor(name) {
+    if (name === "config") return { adminPin: "1234", title: "Squadrone" };
+    return [];
+  }
+
   async function readTable(name) {
     var url =
       ghBase() +
-      "/contents/db/" +
+      "/contents/" +
       name +
       ".json?ref=" +
       encodeURIComponent(cfg.branch);
     var res = await fetch(url, {
       headers: headers("application/vnd.github.raw")
     });
-    if (res.status === 404) return [];
+    if (res.status === 404) return emptyFor(name);
     if (res.status === 401 || res.status === 403) {
       throw new Error(
         "Token non valido o senza accesso a " +
@@ -87,11 +96,11 @@
       throw new Error("Lettura " + name + " fallita (HTTP " + res.status + ")");
     }
     var txt = await res.text();
-    if (!txt.trim()) return [];
+    if (!txt.trim()) return emptyFor(name);
     try {
       return JSON.parse(txt);
     } catch (e) {
-      throw new Error("JSON non valido in db/" + name + ".json");
+      throw new Error("JSON non valido in " + name + ".json");
     }
   }
 
@@ -104,7 +113,7 @@
     }
     var results = await Promise.all(TABLES.map(readTable));
     TABLES.forEach(function (t, i) {
-      tables[t] = results[i] || [];
+      tables[t] = results[i] != null ? results[i] : emptyFor(t);
     });
     loaded = true;
     return tables;
@@ -133,7 +142,7 @@
 
     var treeItems = names.map(function (n) {
       return {
-        path: "db/" + n + ".json",
+        path: n + ".json",
         mode: "100644",
         type: "blob",
         content: JSON.stringify(tables[n], null, 2)

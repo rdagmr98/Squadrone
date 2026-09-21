@@ -10,7 +10,7 @@ Registro presenza/assenze per lo squadrone (personale AMI).
 ## Flussi
 
 1. **Personale** — registrazione nome+cognome; segna presente oppure assenza (licenze, guardia, polveriera, 72° stormo, ritardi, altro/note).
-2. **Comandante** — PIN admin (default `0000` in `js/config.js`); dashboard presenti/assenti + motivo.
+2. **Comandante** — PIN admin (default `1234` in `squadrone-data/config.json`); dashboard presenti/assenti + motivo.
 
 ## Setup PAT
 

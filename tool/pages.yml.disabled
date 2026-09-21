@@ -1,3 +1,7 @@
+# Optional: restore as .github/workflows/pages.yml after
+# `gh auth refresh -s workflow` (OAuth currently lacks workflow scope).
+# Until then Pages uses classic branch deploy from main /.
+
 name: Deploy Squadrone su GitHub Pages
 
 on:
@@ -23,8 +27,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Opzionale: inietta PAT di scrittura (come READ_PAT su corsi/AVES).
-      # Secret: SQUADRONE_PAT — Fine-Grained con Contents R/W su squarone-data.
       - name: Inject config PAT
         env:
           SQUADRONE_PAT: ${{ secrets.SQUADRONE_PAT }}
@@ -38,7 +40,7 @@ jobs:
             "repo": "squadrone-data",
             "branch": "main",
             "pat": pat,
-            "adminPin": "0000",
+            "adminPin": "1234",
           }
           pathlib.Path("js/config.js").write_text(
               "window.SQUADRONE_CONFIG = " + json.dumps(cfg, indent=2) + ";\n",

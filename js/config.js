@@ -5,5 +5,5 @@ window.SQUADRONE_CONFIG = {
   repo: "squadrone-data",
   branch: "main",
   pat: "",
-  adminPin: "0000"
+  adminPin: "1234"
 };
