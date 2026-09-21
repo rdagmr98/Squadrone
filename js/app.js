@@ -7,6 +7,7 @@
     { id: "guardia", label: "Guardia" },
     { id: "polveriera", label: "Polveriera" },
     { id: "72_stormo", label: "72° Stormo" },
+    { id: "h7", label: "Hangar 7" },
     { id: "ritardi", label: "Ritardi" },
     { id: "altro", label: "Altro / note" }
   ];
@@ -82,7 +83,7 @@
 
   async function ensureData() {
     if (!Store.hasPat()) {
-      openSettings("Inserisci il PAT per collegare squarone-data.");
+      openSettings("Inserisci il PAT per collegare squadrone-data.");
       throw new Error("PAT mancante");
     }
     busy(true);
@@ -494,7 +495,7 @@
     Store.reset();
 
     if (!Store.hasPat()) {
-      err.textContent = "Inserisci un PAT con Contents Read/Write su squarone-data.";
+      err.textContent = "Inserisci un PAT con Contents Read/Write su squadrone-data.";
       return;
     }
     busy(true);
