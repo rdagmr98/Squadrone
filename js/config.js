@@ -5,5 +5,5 @@ window.SQUADRONE_CONFIG = {
   repo: "squadrone-data",
   branch: "main",
   pat: "",
-  adminPin: "3108"
+  cmd: "mubqvhx6r8lx4o"
 };

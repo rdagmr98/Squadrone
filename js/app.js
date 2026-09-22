@@ -7,12 +7,14 @@
     guardia: { l: "Guardia", i: "shield-star", c: "#fbbf24" },
     polveriera: { l: "Polveriera", i: "warehouse", c: "#fb7185" },
     stormo72: { l: "72° Stormo", i: "airplane-in-flight", c: "#60a5fa" },
-    ritardo: { l: "Ritardo", i: "clock-countdown", c: "#fb923c" },
+    orario: { l: "Assenza oraria", i: "clock-countdown", c: "#fb923c" },
     altro: { l: "Altro", i: "note-pencil", c: "#a78bfa" }
   };
   const PRESENTE = { l: "Presente", i: "check-circle", c: "#34d399" };
+  const GRUPPI = { officina: "Officina", tecnica: "Sezione Tecnica" };
+  const ST = { attesa: "In attesa", no: "Rifiutato", si: "Accettato" };
   const KEY = "sq_uid";
-  const S = { me: null, view: "me", day: null, reopen: null, back: null, last: 0 };
+  const S = { me: null, view: "me", day: null, grp: "", reopen: null, back: null, last: 0 };
 
   const $ = (s, r = document) => r.querySelector(s);
   const app = $("#app"), nav = $("#nav"), dlg = $("#sheet"), toastEl = $("#toast");
@@ -25,7 +27,7 @@
   const parse = (s) => { const [y, m, d] = s.split("-"); return new Date(y, m - 1, d); };
   const addDays = (s, n) => { const d = parse(s); d.setDate(d.getDate() + n); return iso(d); };
   const fmt = (s, o = { day: "numeric", month: "short" }) => parse(s).toLocaleDateString("it-IT", o);
-  const range = (a) => (a.dal === a.al ? fmt(a.dal) : `${fmt(a.dal)} – ${fmt(a.al)}`);
+  const range = (a) => (a.dal === a.al ? fmt(a.dal) : `${fmt(a.dal)} – ${fmt(a.al)}`) + (a.dalle ? ` · ${a.dalle}–${a.alle}` : "");
   const norm = (s) => String(s || "").trim().replace(/\s+/g, " ").toLowerCase();
   const title = (s) => norm(s).replace(/(^|[\s'-])\p{L}/gu, (m) => m.toUpperCase());
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -35,9 +37,25 @@
   const byId = (id) => Store.tables.personnel.find((p) => p.id === id);
   const people = () => [...Store.tables.personnel].sort((a, b) => fullName(a).localeCompare(fullName(b), "it"));
   const tipo = (a) => TIPI[a.tipo] || TIPI.altro;
-  const actsOn = (pid, d) => Store.tables.absences.filter((a) => a.personId === pid && a.dal <= d && d <= a.al);
+  // i rifiutati non contano come assenza, ma restano visibili in "Prossimi" a chi li ha chiesti
+  const actsOn = (pid, d) => Store.tables.absences.filter((a) => a.personId === pid && a.cmd !== "no" && a.dal <= d && d <= a.al);
   const upcoming = (pid) => Store.tables.absences.filter((a) => a.personId === pid && a.al >= today()).sort((a, b) => a.dal.localeCompare(b.dal));
   const statusOf = (pid, d) => { const a = actsOn(pid, d)[0]; return a ? tipo(a) : PRESENTE; };
+
+  // Ruoli: comandante = Store.cfg.cmd (unico, niente PIN) · admin = nessun gruppo · capo = admin con capo "officina"|"tecnica"
+  const isCmd = (p) => !!p && p.id === Store.cfg.cmd;
+  const isAdmin = (p) => !!p && (!!p.admin || isCmd(p));
+  const grp = (p) => (isAdmin(p) || !GRUPPI[p.gruppo] ? null : p.gruppo);
+  const capoDi = (p) => (p && p.admin && GRUPPI[p.capo] ? p.capo : null);
+  const ruolo = (p) => isCmd(p) ? "Comandante" : capoDi(p) ? "Capo " + GRUPPI[p.capo] : p.admin ? "Admin" : GRUPPI[grp(p)] || "";
+  // Impegno: cmd = decisione finale del comandante · capo = parere del capo gruppo (solo se inserito da un utente con gruppo)
+  const stato = (a) => a.cmd || "attesa";
+  const stTag = (s, txt = ST[s]) => ` <span class="st ${s}">${txt}</span>`;
+  const canApprove = (p) => isCmd(p) || !!capoDi(p);
+  const daApprovare = () => Store.tables.absences.filter((a) => !a.cmd && byId(a.personId) &&
+    (isCmd(S.me) || (a.gruppo && !a.capo && a.gruppo === capoDi(S.me))));
+  const gruppoSeg = (v, attr = "") => `<div class="seg">${Object.entries(GRUPPI).map(([k, l]) =>
+    `<label><input type="radio" name="gruppo" value="${k}" ${v === k ? "checked" : ""} ${attr}>${l}</label>`).join("")}</div>`;
 
   async function hash(pw, salt) {
     const te = new TextEncoder();
@@ -98,19 +116,26 @@
             <input name="pw" type="password" placeholder="Password" autocomplete="current-password" enterkeyhint="go">
             <button type="button" data-act="eye" aria-label="Mostra password">${icon("eye")}</button>
           </div>
+          <div class="reg-only">${gruppoSeg("")}</div>
           <button class="cta wide" type="submit"><span>Entra</span><b>${icon("arrow-right")}</b></button>
         </form>
       </div>
     </section>`;
 
-  const header = () => `
+  function header() {
+    const n = canApprove(S.me) ? daApprovare().length : 0;
+    return `
     <header class="top rise">
       <button class="who" data-act="profile">
         <span class="av" style="--c:${statusOf(S.me.id, today()).c}">${initials(S.me)}</span>
-        <span><b>${esc(S.me.nome)} ${esc(S.me.cognome)}</b><small>Sq. Mantenimento · H7</small></span>
+        <span><b>${esc(S.me.nome)} ${esc(S.me.cognome)}</b><small>${esc(ruolo(S.me) || "Sq. Mantenimento · H7")}</small></span>
       </button>
-      <button class="icon-btn" data-act="refresh" aria-label="Aggiorna">${icon("arrows-clockwise")}</button>
+      <span class="top-r">
+        ${canApprove(S.me) ? `<button class="icon-btn bell${S.view === "richieste" ? " on" : ""}" data-act="view" data-v="richieste" aria-label="Da approvare">${icon("bell")}${n ? `<b>${n}</b>` : ""}</button>` : ""}
+        <button class="icon-btn" data-act="refresh" aria-label="Aggiorna">${icon("arrows-clockwise")}</button>
+      </span>
     </header>`;
+  }
 
   const navView = (v) =>
     [["oggi", "squares-four", "Oggi"], ["personale", "users-three", "Personale"], ["me", "user", "Io"]]
@@ -119,7 +144,8 @@
 
   function statusCard(acts, d) {
     const a = acts[0], t = a ? tipo(a) : PRESENTE;
-    const sub = a ? [a.dal !== a.al ? `fino al ${fmt(a.al, { day: "numeric", month: "long" })}` : "", a.note ? esc(a.note) : ""].filter(Boolean) : [];
+    const sub = a ? [a.dal !== a.al ? `fino al ${fmt(a.al, { day: "numeric", month: "long" })}` : "", a.dalle ? `dalle ${a.dalle} alle ${a.alle}` : "",
+      a.cmd ? "" : "In attesa di approvazione", a.note ? esc(a.note) : ""].filter(Boolean) : [];
     return `
       <div class="shell rise" style="--d:1"><div class="core status" style="--c:${t.c}">
         <div class="eyebrow">Oggi · ${fmt(d, { weekday: "long", day: "numeric", month: "long" })}</div>
@@ -132,7 +158,7 @@
     const t = tipo(a);
     return `<div class="row rise" style="--d:${Math.min(i, 8) + 4};--c:${t.c}">
       <span class="tag">${icon(t.i)}</span>
-      <span class="row-t"><b>${t.l}</b><small>${range(a)}</small>${a.note ? `<em>${esc(a.note)}</em>` : ""}</span>
+      <span class="row-t"><b>${t.l}</b><small>${range(a)}${a.cmd === "si" ? "" : stTag(stato(a))}</small>${a.note ? `<em>${esc(a.note)}</em>` : ""}</span>
       <button class="icon-btn sm" data-act="del" data-id="${a.id}" aria-label="Elimina">${icon("x")}</button>
     </div>`;
   };
@@ -145,17 +171,22 @@
   }
 
   function oggiView() {
-    const d = S.day, all = people(), ass = [], pres = [], counts = {};
-    all.forEach((p) => { const a = actsOn(p.id, d); a.length ? ass.push([p, a]) : pres.push(p); });
-    ass.forEach(([, a]) => (counts[a[0].tipo] = (counts[a[0].tipo] || 0) + 1));
+    const d = S.day, all = people().filter((p) => !S.grp || grp(p) === S.grp), ass = [], ore = [], pres = [], counts = {};
+    all.forEach((p) => {
+      const a = actsOn(p.id, d), full = a.filter((x) => x.tipo !== "orario"), h = a.filter((x) => x.tipo === "orario");
+      full.length ? ass.push([p, full]) : pres.push(p); // assenza oraria = presente, elencata a parte
+      if (h.length) ore.push([p, h]);
+    });
+    [...ass, ...ore].forEach(([, a]) => (counts[a[0].tipo] = (counts[a[0].tipo] || 0) + 1));
     const pct = all.length ? Math.round((pres.length / all.length) * 100) : 0;
     const isToday = d === today();
 
-    const absRows = ass.map(([p, acts], i) => {
-      const a = acts[0], t = tipo(a), notes = acts.map((x) => x.note).filter(Boolean).join(" · ");
-      return `<div class="row tap rise" style="--d:${Math.min(i, 8) + 5};--c:${t.c}" data-act="person" data-id="${p.id}">
+    const rows = (l, d0) => l.map(([p, acts], i) => {
+      const t = tipo(acts[0]), notes = acts.map((x) => x.note).filter(Boolean).join(" · ");
+      const when = acts.map((x) => (x.dalle ? `${x.dalle}–${x.alle}` : x.dal !== x.al ? range(x) : "")).filter(Boolean).join(", ");
+      return `<div class="row tap rise" style="--d:${Math.min(i, 8) + d0};--c:${t.c}" data-act="person" data-id="${p.id}">
         <span class="tag">${icon(t.i)}</span>
-        <span class="row-t"><b>${esc(fullName(p))}</b><small>${acts.map((x) => tipo(x).l).join(" + ")}${a.dal !== a.al ? " · " + range(a) : ""}</small>${notes ? `<em>${esc(notes)}</em>` : ""}</span>
+        <span class="row-t"><b>${esc(fullName(p))}</b><small>${[...new Set(acts.map((x) => tipo(x).l))].join(" + ")}${when ? " · " + when : ""}${acts.some((x) => !x.cmd) ? stTag("attesa") : ""}</small>${notes ? `<em>${esc(notes)}</em>` : ""}</span>
       </div>`;
     }).join("");
 
@@ -169,6 +200,8 @@
         </label>
         <button class="icon-btn" data-act="day" data-n="1" aria-label="Giorno dopo">${icon("caret-right")}</button>
       </div>
+      <div class="seg grp rise">${[["", "Tutti"], ["officina", "Officina"], ["tecnica", "Sez. Tecnica"]].map(([k, l]) =>
+        `<button data-act="filtro" data-g="${k}" class="${S.grp === k ? "on" : ""}">${l}</button>`).join("")}</div>
       <div class="bento">
         <div class="shell rise" style="--d:1"><div class="core kpi">
           <div class="eyebrow"><i class="dot" style="--c:var(--ok)"></i>Presenti</div>
@@ -184,7 +217,8 @@
         ${isToday ? "" : `<button class="chip back" data-act="today">${icon("calendar-dots")}Oggi</button>`}
         ${Object.keys(TIPI).filter((k) => counts[k]).map((k) => `<span class="chip" style="--c:${TIPI[k].c}">${icon(TIPI[k].i)}${TIPI[k].l}<b>${counts[k]}</b></span>`).join("")}
       </div>
-      ${ass.length ? `<h2 class="sec rise" style="--d:4">Assenti</h2><div class="list">${absRows}</div>` : ""}
+      ${ass.length ? `<h2 class="sec rise" style="--d:4">Assenti</h2><div class="list">${rows(ass, 5)}</div>` : ""}
+      ${ore.length ? `<h2 class="sec rise" style="--d:5">Assenze orarie<b>${ore.length}</b></h2><div class="list">${rows(ore, 6)}</div>` : ""}
       ${pres.length ? `<details class="pres rise" style="--d:6"><summary>Presenti<b>${pres.length}</b></summary>
         <div class="names">${pres.map((p) => `<button data-act="person" data-id="${p.id}">${esc(fullName(p))}</button>`).join("")}</div></details>` : ""}`;
   }
@@ -198,10 +232,32 @@
         const s = statusOf(p.id, d);
         return `<div class="row tap rise" style="--d:${Math.min(i, 8) + 2};--c:${s.c}" data-act="person" data-id="${p.id}" data-name="${esc(norm(fullName(p) + " " + p.nome + " " + p.cognome))}">
           <span class="av">${initials(p)}</span>
-          <span class="row-t"><b>${esc(fullName(p))}${p.admin ? " " + icon("crown") : ""}</b><small>${s.l}</small></span>
+          <span class="row-t"><b>${esc(fullName(p))}${isAdmin(p) ? " " + icon("crown") : ""}</b><small>${[s.l, ruolo(p)].filter(Boolean).join(" · ")}</small></span>
           ${icon("caret-right")}
         </div>`;
       }).join("")}</div>`;
+  }
+
+  function reqRow(a, i) {
+    const p = byId(a.personId), t = tipo(a), by = a.by !== a.personId && byId(a.by);
+    const info = [ruolo(p), by && "inserito da " + fullName(by)].filter(Boolean).join(" · ");
+    const capo = isCmd(S.me) && a.gruppo ? stTag(a.capo || "attesa", `Capo ${GRUPPI[a.gruppo]}: ${ST[a.capo || "attesa"].toLowerCase()}`) : "";
+    return `<div class="req rise" style="--d:${Math.min(i, 8) + 1};--c:${t.c}">
+      <div class="row">
+        <span class="tag">${icon(t.i)}</span>
+        <span class="row-t"><b>${esc(fullName(p))}</b><small>${t.l} · ${range(a)}</small>${a.note ? `<em>${esc(a.note)}</em>` : ""}${info || capo ? `<em>${esc(info)}${capo}</em>` : ""}</span>
+      </div>
+      <div class="req-act">
+        <button class="ghost" data-act="ok" data-id="${a.id}" data-v="no">${icon("x")}<span>Rifiuta</span></button>
+        <button class="ghost yes" data-act="ok" data-id="${a.id}" data-v="si">${icon("check")}<span>Accetta</span></button>
+      </div>
+    </div>`;
+  }
+
+  function richiesteView() {
+    const l = daApprovare().sort((a, b) => a.dal.localeCompare(b.dal));
+    return `<h2 class="sec rise">Da approvare<b>${l.length}</b></h2>` +
+      (l.length ? `<div class="list">${l.map(reqRow).join("")}</div>` : `<p class="empty rise" style="--d:1">Nessuna richiesta in attesa</p>`);
   }
 
   function render(anim) {
@@ -212,10 +268,12 @@
       app.innerHTML = authView();
       return;
     }
-    const v = S.me.admin ? S.view : "me";
-    app.innerHTML = header() + (v === "oggi" ? oggiView() : v === "personale" ? personaleView() : meView());
-    nav.hidden = !S.me.admin;
-    if (S.me.admin) nav.innerHTML = navView(v);
+    const adm = isAdmin(S.me), v = adm ? S.view : "me";
+    app.innerHTML = header() + ({ oggi: oggiView, personale: personaleView, richieste: richiesteView }[v] || meView)();
+    nav.hidden = !adm;
+    if (adm) nav.innerHTML = navView(v);
+    // badge sull'icona dell'app installata (dove supportato): richieste da approvare
+    navigator.setAppBadge?.(canApprove(S.me) ? daApprovare().length : 0)?.catch(() => {});
   }
 
   /* ---------- sheets ---------- */
@@ -225,10 +283,8 @@
     const me = S.me;
     sheet(`
       <div class="sh-head"><span class="av lg" style="--c:${statusOf(me.id, today()).c}">${initials(me)}</span>
-        <div><b>${esc(me.nome)} ${esc(me.cognome)}</b><small>${me.admin ? "Comando" : "Sq. Mantenimento · H7"}</small></div></div>
-      ${me.admin ? "" : `<form id="pinForm" class="pin" novalidate>
-        <input name="pin" type="password" inputmode="numeric" placeholder="PIN comando" autocomplete="off">
-        <button class="icon-btn" type="submit" aria-label="Sblocca">${icon("lock-key")}</button></form>`}
+        <div><b>${esc(me.nome)} ${esc(me.cognome)}</b><small>${esc(ruolo(me) || "Sq. Mantenimento · H7")}</small></div></div>
+      ${isAdmin(me) ? "" : `<div class="eyebrow grp-l">Gruppo</div>${gruppoSeg(me.gruppo, 'data-change="gruppo"')}`}
       <button class="ghost wide" data-act="logout">${icon("sign-out")}<span>Esci</span></button>`);
   }
 
@@ -236,15 +292,19 @@
     const p = byId(id);
     if (!p) return closeSheet();
     const s = statusOf(id, today()), mine = upcoming(id), self = id === S.me.id;
+    // admin, capi ed eliminazione: solo il comandante
+    const cmdTools = !isCmd(S.me) ? "" : `
+        <button data-act="admin" data-id="${id}" class="${p.admin ? "on" : ""}" ${self ? "disabled" : ""}>${icon("crown")}<span>Admin</span></button>
+        ${p.admin && !self ? Object.entries(GRUPPI).map(([k, l]) =>
+          `<button data-act="capo" data-id="${id}" data-g="${k}" class="${p.capo === k ? "on" : ""}">${icon("star")}<span>Capo ${l}</span></button>`).join("") : ""}
+        <button class="danger" data-act="remove" data-id="${id}" ${self ? "disabled" : ""}>${icon("trash")}<span>Elimina</span></button>`;
     sheet(`
       <div class="sh-head"><span class="av lg" style="--c:${s.c}">${initials(p)}</span>
-        <div><b>${esc(fullName(p))}</b><small>${s.l}</small></div></div>
+        <div><b>${esc(fullName(p))}</b><small>${[s.l, ruolo(p)].filter(Boolean).join(" · ")}</small></div></div>
       <button class="cta wide" data-act="add" data-who="${id}"><span>Nuovo impegno</span><b>${icon("plus")}</b></button>
       ${mine.length ? `<div class="list mt">${mine.map(actRow).join("")}</div>` : ""}
       <div class="tools">
-        <button data-act="reset" data-id="${id}">${icon("key")}<span>Reset password</span></button>
-        <button data-act="admin" data-id="${id}" class="${p.admin ? "on" : ""}" ${self ? "disabled" : ""}>${icon("crown")}<span>Admin</span></button>
-        <button class="danger" data-act="remove" data-id="${id}" ${self ? "disabled" : ""}>${icon("trash")}<span>Elimina</span></button>
+        <button data-act="reset" data-id="${id}">${icon("key")}<span>Reset password</span></button>${cmdTools}
       </div>`);
     S.reopen = () => personSheet(id);
   }
@@ -270,7 +330,11 @@
           `<label class="tipo" style="--c:${t.c}"><input type="radio" name="tipo" value="${k}">${icon(t.i)}<span>${t.l}</span></label>`).join("")}</div>
         <div class="dates">
           <label><small>Dal</small><input type="date" name="dal" value="${d}"></label>
-          <label><small>Al</small><input type="date" name="al" value="${d}" min="${d}"></label>
+          <label class="d-al"><small>Al</small><input type="date" name="al" value="${d}" min="${d}"></label>
+        </div>
+        <div class="dates ore">
+          <label><small>Dalle</small><input type="time" name="dalle" step="900"></label>
+          <label><small>Alle</small><input type="time" name="alle" step="900"></label>
         </div>
         <textarea name="note" rows="2" placeholder="Note"></textarea>
         <button class="cta wide" type="submit"><span>Salva</span><b>${icon("check")}</b></button>
@@ -300,7 +364,7 @@
   function login(p) {
     localStorage.setItem(KEY, p.id);
     S.me = p;
-    S.view = p.admin ? "oggi" : "me";
+    S.view = isAdmin(p) ? "oggi" : "me";
     render(true);
   }
 
@@ -311,10 +375,12 @@
     await Store.loadAll();
 
     if (f.dataset.mode === "reg") {
+      const gruppo = f.elements.gruppo.value;
+      if (!gruppo) throw new Error("Scegli il gruppo");
       const salt = uid(), h = await hash(pw, salt);
       const p = await Store.mutate("personnel", (l) => {
         if (l.some(same)) throw new Error("Già registrato: usa Accedi");
-        const p = { id: uid(), nome, cognome, salt, hash: h, createdAt: new Date().toISOString() };
+        const p = { id: uid(), nome, cognome, gruppo, salt, hash: h, createdAt: new Date().toISOString() };
         l.push(p);
         return p;
       }, `registra ${cognome} ${nome}`);
@@ -337,30 +403,25 @@
   async function doAdd(f) {
     const ids = [...f.querySelectorAll("[name=p]")].filter((c) => c.type === "hidden" || c.checked).map((c) => c.value);
     const t = f.elements.tipo.value, note = f.elements.note.value.trim(), dal = f.elements.dal.value;
-    const al = f.elements.al.value < dal ? dal : f.elements.al.value;
+    const orario = t === "orario", dalle = f.elements.dalle.value, alle = f.elements.alle.value;
+    const al = orario || f.elements.al.value < dal ? dal : f.elements.al.value;
     if (!ids.length) { f.querySelector(".chi")?.classList.add("open"); throw new Error("Scegli chi"); }
     if (!t) throw new Error("Scegli il tipo");
     if (!dal) throw new Error("Scegli la data");
+    if (orario && !(dalle && alle && dalle < alle)) throw new Error("Scegli le ore: dalle … alle");
     if (t === "altro" && !note) throw new Error("Scrivi una nota");
-    if (!S.me.admin && ids.some((id) => id !== S.me.id)) throw new Error("Non autorizzato");
-    const at = new Date().toISOString();
+    if (!isAdmin(S.me) && ids.some((id) => id !== S.me.id)) throw new Error("Non autorizzato");
+    const r = { tipo: t, dal, al, note, by: S.me.id, at: new Date().toISOString() };
+    if (orario) Object.assign(r, { dalle, alle });
+    if (isCmd(S.me)) r.cmd = "si"; // il comandante non attende approvazione
+    else if (!isAdmin(S.me) && grp(S.me)) r.gruppo = grp(S.me); // utente: lo vede anche il capo del suo gruppo
     await Store.mutate("absences", (l) => {
-      ids.forEach((pid) => l.push({ id: uid(), personId: pid, tipo: t, dal, al, note, by: S.me.id, at }));
-    }, `${TIPI[t].l} ${dal}${al !== dal ? "→" + al : ""} ×${ids.length}`);
+      ids.forEach((pid) => l.push({ id: uid(), personId: pid, ...r }));
+    }, `${TIPI[t].l} ${dal}${al !== dal ? "→" + al : ""}${orario ? ` ${dalle}-${alle}` : ""} ×${ids.length}`);
     const back = S.back;
     render();
     back ? back() : closeSheet();
-    toast("Salvato");
-  }
-
-  async function doPin(f) {
-    const pin = String(Store.cfg.adminPin || "");
-    if (!pin || f.elements.pin.value.trim() !== pin) throw new Error("PIN errato");
-    await editPerson(S.me.id, (x) => (x.admin = true), `admin ${S.me.cognome}`);
-    closeSheet();
-    S.view = "oggi";
-    render(true);
-    toast("Accesso comando");
+    toast(r.cmd ? "Salvato" : "Inviato per approvazione");
   }
 
   async function refresh() {
@@ -385,6 +446,7 @@
     view(t) { S.view = t.dataset.v; render(true); scrollTo(0, 0); },
     day(t) { S.day = addDays(S.day, +t.dataset.n); render(true); },
     today() { S.day = today(); render(true); },
+    filtro(t) { S.grp = t.dataset.g; render(true); },
     pick(t) { if (matchMedia("(pointer: fine)").matches) try { t.showPicker(); } catch (_) {} },
     chi(t) { t.parentNode.classList.toggle("open"); },
     refresh: (t) => run(t, refresh),
@@ -397,12 +459,33 @@
       await Store.mutate("absences", (l) => { const i = l.findIndex((a) => a.id === t.dataset.id); if (i >= 0) l.splice(i, 1); }, "elimina impegno");
       afterChange();
     }),
+    ok: (t) => run(t, async () => {
+      const k = isCmd(S.me) ? "cmd" : "capo", v = t.dataset.v;
+      await Store.mutate("absences", (l) => {
+        const a = l.find((x) => x.id === t.dataset.id);
+        if (!a) throw new Error("Richiesta non trovata");
+        a[k] = v;
+      }, `${k} ${v}`);
+      afterChange();
+      toast(v === "si" ? "Accettato" : "Rifiutato");
+    }),
     reset: (t) => run(t, async () => {
       await editPerson(t.dataset.id, (x) => { delete x.hash; delete x.salt; }, "reset password");
       toast("Password azzerata: al prossimo accesso ne sceglie una nuova");
     }),
     admin: (t) => run(t, async () => {
-      await editPerson(t.dataset.id, (x) => { if (x.admin) delete x.admin; else x.admin = true; }, "ruolo admin");
+      await editPerson(t.dataset.id, (x) => { if (x.admin) { delete x.admin; delete x.capo; } else x.admin = true; }, "ruolo admin");
+      afterChange();
+    }),
+    capo: (t) => run(t, async () => {
+      const g = t.dataset.g;
+      await Store.mutate("personnel", (l) => {
+        const x = l.find((p) => p.id === t.dataset.id);
+        if (!x || !x.admin) throw new Error("Solo tra gli admin");
+        const on = x.capo !== g;
+        l.forEach((p) => { if (p.capo === g) delete p.capo; }); // un solo capo per gruppo
+        if (on) x.capo = g;
+      }, `capo ${g}`);
       afterChange();
     }),
     remove(t) {
@@ -425,13 +508,18 @@
 
   document.addEventListener("submit", (e) => {
     e.preventDefault();
-    const f = e.target, fn = { authForm: doAuth, addForm: doAdd, pinForm: doPin }[f.id];
+    const f = e.target, fn = { authForm: doAuth, addForm: doAdd }[f.id];
     if (fn) run(f.querySelector("[type=submit]"), () => fn(f));
   });
 
   document.addEventListener("change", (e) => {
     const t = e.target;
     if (t.dataset.change === "day" && t.value) { S.day = t.value; render(true); }
+    if (t.dataset.change === "gruppo") run(null, async () => {
+      await editPerson(S.me.id, (x) => (x.gruppo = t.value), `gruppo ${S.me.cognome}`);
+      render();
+      toast("Gruppo: " + GRUPPI[t.value]);
+    });
     if (t.dataset.change === "all") t.form.querySelectorAll("[name=p]").forEach((c) => (c.checked = t.checked));
     if (t.closest(".chi")) chiSync(t.closest(".chi"));
     if (t.name === "dal" && t.form.id === "addForm") {
@@ -448,7 +536,8 @@
   });
 
   dlg.addEventListener("click", (e) => { if (e.target === dlg) closeSheet(); });
-  dlg.addEventListener("close", () => { S.reopen = S.back = null; });
+  // l'evento close arriva in coda: se nel frattempo si è riaperto un altro sheet, non azzerarlo
+  dlg.addEventListener("close", () => { if (!dlg.open) S.reopen = S.back = null; });
 
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden && S.me && Date.now() - S.last > 20000) refresh().catch(() => {});
@@ -465,7 +554,7 @@
       return;
     }
     S.me = byId(localStorage.getItem(KEY)) || null;
-    S.view = S.me && S.me.admin ? "oggi" : "me";
+    S.view = isAdmin(S.me) ? "oggi" : "me";
     S.day = today();
     render(true);
   }

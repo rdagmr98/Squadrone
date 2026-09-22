@@ -7,12 +7,14 @@ Presenze/assenze dello squadrone, mobile-first. HTML/JS vanilla, nessuna build.
 - **Frontend** (questo repo): GitHub Pages via `.github/workflows/pages.yml`
 - **Dati**: [`squadrone-data`](https://github.com/rdagmr98/squadrone-data) → `db/personnel.json`, `db/absences.json` (GitHub Contents API)
 - **Scritture**: `Store.mutate` rilegge + riapplica su conflitto (409/422) → nessun salvataggio perso con più utenti insieme
-- **PAT**: secret Actions `SQUADRONE_PAT` (fallback `READ_PAT`) iniettato in `js/config.js` al deploy, insieme a `adminPin`
+- **PAT**: secret Actions `SQUADRONE_PAT` (fallback `READ_PAT`) iniettato in `js/config.js` al deploy, insieme a `cmd` (id del comandante)
 
 ## Flussi
 
-1. **Personale** — registrazione/login con nome, cognome e password (qualsiasi, hash PBKDF2). Impegni: licenza, guardia, polveriera, 72° Stormo, ritardo, altro (nota).
-2. **Comandante** — Profilo → PIN comando → admin. Vista Oggi: presenti/assenti, motivi, giorno per giorno. Assegna impegni a tutti / ad alcuni / a uno; reset password, admin, elimina.
+1. **Personale** — registrazione/login con nome, cognome e password (qualsiasi, hash PBKDF2). Impegni: licenza, guardia, polveriera, 72° Stormo, assenza oraria (dalle/alle, stesso giorno), altro (nota). Ogni utente sceglie il gruppo: Officina o Sezione Tecnica.
+2. **Comandante** — unico, identificato da `cmd` in config (niente PIN). Promuove admin (senza gruppo) e sceglie tra loro Capo Officina e Capo Sezione Tecnica. Assegna impegni a tutti / ad alcuni / a uno; reset password, elimina.
+3. **Approvazioni** — impegno di un utente → campanella del capo del suo gruppo e del comandante (che vede il parere del capo e decide). Impegni inseriti da admin/capi → solo comandante. Rifiutati = non contano come assenza.
+4. **Oggi** — presenti/assenti/assenze orarie per giorno, filtro Tutti / Officina / Sez. Tecnica.
 
 ## Setup (una tantum)
 
