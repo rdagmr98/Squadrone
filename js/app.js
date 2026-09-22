@@ -40,7 +40,10 @@
   // i rifiutati non contano come assenza, ma restano visibili in "Prossimi" a chi li ha chiesti
   const actsOn = (pid, d) => Store.tables.absences.filter((a) => a.personId === pid && a.cmd !== "no" && a.dal <= d && d <= a.al);
   const upcoming = (pid) => Store.tables.absences.filter((a) => a.personId === pid && a.al >= today()).sort((a, b) => a.dal.localeCompare(b.dal));
-  const statusOf = (pid, d) => { const a = actsOn(pid, d)[0]; return a ? tipo(a) : PRESENTE; };
+  const hm = () => { const n = new Date(); return `${pad(n.getHours())}:${pad(n.getMinutes())}`; };
+  // assenza oraria: assente solo dentro la sua fascia di oggi; fuori fascia (o in altri giorni) resta presente
+  const assente = (a, d) => a.tipo !== "orario" || (d === today() && a.dalle <= hm() && hm() < a.alle);
+  const statusOf = (pid, d) => { const a = actsOn(pid, d).find((x) => assente(x, d)); return a ? tipo(a) : PRESENTE; };
 
   // Ruoli: comandante = Store.cfg.cmd (unico, niente PIN) · admin = nessun gruppo · capo = admin con capo "officina"|"tecnica"
   const isCmd = (p) => !!p && p.id === Store.cfg.cmd;
@@ -173,8 +176,8 @@
   function oggiView() {
     const d = S.day, all = people().filter((p) => !S.grp || grp(p) === S.grp), ass = [], ore = [], pres = [], counts = {};
     all.forEach((p) => {
-      const a = actsOn(p.id, d), full = a.filter((x) => x.tipo !== "orario"), h = a.filter((x) => x.tipo === "orario");
-      full.length ? ass.push([p, full]) : pres.push(p); // assenza oraria = presente, elencata a parte
+      const a = actsOn(p.id, d), full = a.filter((x) => assente(x, d)), h = a.filter((x) => !assente(x, d));
+      full.length ? ass.push([p, full]) : pres.push(p); // assenza oraria fuori fascia = presente, elencata a parte
       if (h.length) ore.push([p, h]);
     });
     [...ass, ...ore].forEach(([, a]) => (counts[a[0].tipo] = (counts[a[0].tipo] || 0) + 1));
@@ -274,7 +277,12 @@
     if (adm) nav.innerHTML = navView(v);
     // badge sull'icona dell'app installata (dove supportato): richieste da approvare
     navigator.setAppBadge?.(canApprove(S.me) ? daApprovare().length : 0)?.catch(() => {});
+    S.oraSig = oraSig();
   }
+
+  // ad app aperta: ridisegna quando una fascia oraria di oggi inizia o finisce
+  const oraSig = () => Store.tables.absences.filter((a) => a.tipo === "orario" && a.cmd !== "no" && a.dal === today() && assente(a, today())).map((a) => a.id).join();
+  setInterval(() => { if (S.me && !dlg.open && oraSig() !== S.oraSig) render(); }, 60000);
 
   /* ---------- sheets ---------- */
 
