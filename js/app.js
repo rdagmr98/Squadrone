@@ -166,9 +166,9 @@
     </header>`;
   }
 
-  const navView = (v) =>
-    [["oggi", "squares-four", "Oggi"], ["personale", "users-three", "Personale"], isAiut(S.me) && ["licenze", "list-checks", "Licenze"], ["me", "user", "Io"]]
-      .filter(Boolean)
+  const navView = (v, views) =>
+    [["oggi", "squares-four", "Oggi"], ["personale", "users-three", "Personale"], ["me", "user", "Io"]]
+      .filter(([k]) => views[k])
       .map(([k, i, l]) => `<button data-act="view" data-v="${k}" class="${v === k ? "on" : ""}">${icon(i)}<span>${l}</span></button>`)
       .join("") + (v !== "me" && isAdmin(S.me) ? `<button class="plus" data-act="add" aria-label="Assegna">${icon("plus")}</button>` : "");
 
@@ -331,12 +331,14 @@
       app.innerHTML = authView();
       return;
     }
-    const staff = isStaff(S.me), views = { oggi: oggiView, personale: personaleView, richieste: richiesteView, ...(isAiut(S.me) && { licenze: licenzeView }) };
-    const v = staff && views[S.view] ? S.view : "me";
+    // Aiutante: solo Licenze · Cte: niente "Io" (figure di controllo, non effettivi)
+    const staff = isStaff(S.me) && !isAiut(S.me), views = isAiut(S.me) ? { licenze: licenzeView }
+      : { ...(staff && { oggi: oggiView, personale: personaleView, richieste: richiesteView }), ...(!isCte(S.me) && { me: meView }) };
+    const v = views[S.view] ? S.view : home(S.me);
     app.classList.toggle("wide", v === "licenze");
-    app.innerHTML = header() + (views[v] || meView)();
+    app.innerHTML = header() + views[v]();
     nav.hidden = !staff;
-    if (staff) nav.innerHTML = navView(v);
+    if (staff) nav.innerHTML = navView(v, views);
     // badge sull'icona dell'app installata (dove supportato): richieste da approvare
     navigator.setAppBadge?.(canApprove(S.me) ? daApprovare().length : 0)?.catch(() => {});
     S.oraSig = oraSig();
