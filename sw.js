@@ -12,3 +12,14 @@ self.addEventListener("fetch", e => {
     return res;
   }).catch(() => caches.match(r)));
 });
+
+// Web Push (inviato da push/notify.mjs nell'Action di squadrone-data): arriva anche ad app chiusa
+self.addEventListener("push", e => {
+  const d = e.data ? e.data.json() : {};
+  e.waitUntil(self.registration.showNotification(d.title || "Squadrone H7", { body: d.body || "", icon: "icons/icon-192.png" }));
+});
+self.addEventListener("notificationclick", e => {
+  e.notification.close();
+  e.waitUntil(clients.matchAll({ type: "window", includeUncontrolled: true })
+    .then(l => (l[0] ? l[0].focus() : clients.openWindow("./"))));
+});

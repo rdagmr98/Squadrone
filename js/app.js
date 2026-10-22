@@ -86,6 +86,30 @@
   const gruppoSeg = (v, attr = "") => `<div class="seg">${Object.entries(GRUPPI).map(([k, l]) =>
     `<label><input type="radio" name="gruppo" value="${k}" ${v === k ? "checked" : ""} ${attr}>${l}</label>`).join("")}</div>`;
 
+  // Web Push ad app chiusa: la sottoscrizione sta in personnel[].push, la invia l'Action di squadrone-data (push/notify.mjs)
+  const pushOk = () => "PushManager" in window && "serviceWorker" in navigator && !!Store.cfg.vapid;
+  const iosTab = () => /iPhone|iPad/.test(navigator.userAgent) && !navigator.standalone;
+  const b64u = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+  async function ensureSub(ask) {
+    if (!pushOk() || !S.me) return;
+    if (ask && (await Notification.requestPermission()) !== "granted") throw new Error("Notifiche non consentite: abilitale nelle impostazioni");
+    if (Notification.permission !== "granted") return;
+    const reg = await navigator.serviceWorker.ready;
+    const sub = (await reg.pushManager.getSubscription()) || (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64u(Store.cfg.vapid) }));
+    const j = sub.toJSON(), me = S.me;
+    if ((me.push || []).some((x) => x.endpoint === j.endpoint)) return;
+    // un dispositivo appartiene a una sola persona (telefono condiviso: passa all'ultimo che accede)
+    await Store.mutate("personnel", (l) => {
+      l.forEach((p) => { if (p.push) p.push = p.push.filter((x) => x.endpoint !== j.endpoint); });
+      const p = l.find((x) => x.id === me.id);
+      if (p) p.push = [...(p.push || []), { endpoint: j.endpoint, keys: j.keys }].slice(-5);
+    }, `notifiche ${me.cognome}`);
+  }
+  const pushBar = () => (pushOk() && Notification.permission === "default"
+    ? `<button class="ghost wide push-on rise" data-act="push">${icon("bell-ringing")}<span>Attiva le notifiche</span></button>` : "");
+  const pushHint = () => iosTab() ? "Per ricevere le notifiche: Condividi → Aggiungi alla schermata Home, poi apri l'app da lì."
+    : pushOk() && Notification.permission === "denied" ? "Notifiche bloccate: riattivale dalle impostazioni del telefono." : "";
+
   async function hash(pw, salt) {
     const te = new TextEncoder();
     const key = await crypto.subtle.importKey("raw", te.encode(pw), "PBKDF2", false, ["deriveBits"]);
@@ -336,7 +360,7 @@
       : { ...(staff && { oggi: oggiView, personale: personaleView, richieste: richiesteView }), ...(!isCte(S.me) && { me: meView }) };
     const v = views[S.view] ? S.view : home(S.me);
     app.classList.toggle("wide", v === "licenze");
-    app.innerHTML = header() + views[v]();
+    app.innerHTML = header() + pushBar() + views[v]();
     nav.hidden = !staff;
     if (staff) nav.innerHTML = navView(v, views);
     // badge sull'icona dell'app installata (dove supportato): richieste da approvare
@@ -357,6 +381,7 @@
       <div class="sh-head"><span class="av lg" style="--c:${statusOf(me.id, today()).c}">${initials(me)}</span>
         <div><b>${esc(me.nome)} ${esc(me.cognome)}</b><small>${esc(ruolo(me) || "Sq. Mantenimento · H7")}</small></div></div>
       ${isStaff(me) ? "" : `<div class="eyebrow grp-l">Gruppo</div>${gruppoSeg(me.gruppo, 'data-change="gruppo"')}`}
+      ${pushHint() ? `<p class="push-hint">${icon("bell-slash")}<span>${pushHint()}</span></p>` : ""}
       <button class="ghost wide" data-act="logout">${icon("sign-out")}<span>Esci</span></button>`);
   }
 
@@ -444,6 +469,7 @@
     S.me = p;
     S.view = home(p);
     render(true);
+    ensureSub().catch(() => {});
   }
 
   async function doAuth(f) {
@@ -607,7 +633,12 @@
         render();
       });
     },
-    logout() { localStorage.removeItem(KEY); S.me = null; closeSheet(); render(true); }
+    push: (t) => run(t, async () => { await ensureSub(true); render(); toast("Notifiche attive"); }),
+    logout() {
+      // il dispositivo smette di ricevere; l'endpoint rimasto in personnel risponde 410 e l'invio lo salta
+      navigator.serviceWorker?.ready.then((r) => r.pushManager?.getSubscription()).then((s) => s?.unsubscribe()).catch(() => {});
+      localStorage.removeItem(KEY); S.me = null; closeSheet(); render(true);
+    }
   };
 
   document.addEventListener("click", (e) => {
@@ -671,6 +702,7 @@
     S.view = home(S.me);
     S.day = today();
     render(true);
+    ensureSub().catch(() => {});
   }
 
   boot();

@@ -288,6 +288,9 @@ input[type=date]::-webkit-date-and-time-value, input[type=time]::-webkit-date-an
 .sh-head b { font-size: 20px; font-weight: 600; letter-spacing: -.02em; }
 .grp-l { margin: 0 4px 10px; }
 .grp-l + .seg { margin-bottom: 18px; }
+.push-on { margin: -8px 0 22px; }
+.push-hint { display: flex; align-items: flex-start; gap: 10px; margin: 0 4px 18px; color: var(--mute); font-size: 14px; line-height: 1.45; }
+.push-hint i { flex: none; font-size: 18px; margin-top: 1px; }
 .tools { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 22px; }
 .tools button {
   display: grid; justify-items: center; gap: 8px; padding: 16px 6px; border-radius: 18px;
