@@ -13,8 +13,14 @@
   const PRESENTE = { l: "Presente", i: "check-circle", c: "#34d399" };
   const GRUPPI = { officina: "Officina", tecnica: "Sezione Tecnica" };
   const ST = { attesa: "In attesa", no: "Rifiutato", si: "Accettato" };
+  // Funzioni assegnate solo dal comandante (campo fn sulla persona)
+  const FN = { cte: "Cte di Gruppo", aiutante: "Aiutante Maggiore" };
+  // Tipi di licenza (campo sub); riposo medico e convalescenza non si inseriscono oltre il giorno prima
+  const LIC = { ordinaria: "Ordinaria", straordinaria: "Straordinaria", festivita: "Recupero festività", l937: "937", compensativo: "Recupero compensativo",
+    riposo: "Riposo medico", convalescenza: "Convalescenza", altra: "Altra" };
+  const MEDICA = ["riposo", "convalescenza"];
   const KEY = "sq_uid";
-  const S = { me: null, view: "me", day: null, grp: "", reopen: null, back: null, last: 0 };
+  const S = { me: null, view: "me", day: null, grp: "", lic: "todo", reopen: null, back: null, last: 0 };
 
   const $ = (s, r = document) => r.querySelector(s);
   const app = $("#app"), nav = $("#nav"), dlg = $("#sheet"), toastEl = $("#toast");
@@ -37,8 +43,9 @@
   const byId = (id) => Store.tables.personnel.find((p) => p.id === id);
   const people = () => [...Store.tables.personnel].sort((a, b) => fullName(a).localeCompare(fullName(b), "it"));
   const tipo = (a) => TIPI[a.tipo] || TIPI.altro;
-  // i rifiutati non contano come assenza, ma restano visibili in "Prossimi" a chi li ha chiesti
-  const actsOn = (pid, d) => Store.tables.absences.filter((a) => a.personId === pid && a.cmd !== "no" && a.dal <= d && d <= a.al);
+  const tl = (a) => tipo(a).l + (LIC[a.sub] ? " · " + LIC[a.sub] : "");
+  // i rifiutati (dal comandante o, per le licenze, dal Cte di Gruppo) non contano come assenza, ma restano visibili in "Prossimi" a chi li ha chiesti
+  const actsOn = (pid, d) => Store.tables.absences.filter((a) => a.personId === pid && a.cmd !== "no" && a.cte !== "no" && a.dal <= d && d <= a.al);
   const upcoming = (pid) => Store.tables.absences.filter((a) => a.personId === pid && a.al >= today()).sort((a, b) => a.dal.localeCompare(b.dal));
   const hm = () => { const n = new Date(); return `${pad(n.getHours())}:${pad(n.getMinutes())}`; };
   // assenza oraria: assente solo dentro la sua fascia di oggi; fuori fascia (o in altri giorni) resta presente
@@ -48,15 +55,31 @@
   // Ruoli: comandante = Store.cfg.cmd (unico, niente PIN) · admin = nessun gruppo · capo = admin con capo "officina"|"tecnica"
   const isCmd = (p) => !!p && p.id === Store.cfg.cmd;
   const isAdmin = (p) => !!p && (!!p.admin || isCmd(p));
-  const grp = (p) => (isAdmin(p) || !GRUPPI[p.gruppo] ? null : p.gruppo);
+  const isCte = (p) => !!p && p.fn === "cte";
+  const isAiut = (p) => !!p && p.fn === "aiutante";
+  const isStaff = (p) => isAdmin(p) || !!(p && FN[p.fn]); // vede Oggi e Personale come il comandante
+  const grp = (p) => (isAdmin(p) || FN[p.fn] || !GRUPPI[p.gruppo] ? null : p.gruppo);
   const capoDi = (p) => (p && p.admin && GRUPPI[p.capo] ? p.capo : null);
-  const ruolo = (p) => isCmd(p) ? "Comandante" : capoDi(p) ? "Capo " + GRUPPI[p.capo] : p.admin ? "Admin" : GRUPPI[grp(p)] || "";
+  const ruolo = (p) => isCmd(p) ? "Comandante" : [capoDi(p) ? "Capo " + GRUPPI[p.capo] : p.admin ? "Admin" : "", FN[p.fn]].filter(Boolean).join(" · ") || GRUPPI[grp(p)] || "";
+  const home = (p) => (isAiut(p) ? "licenze" : isStaff(p) ? "oggi" : "me");
   // Impegno: cmd = decisione finale del comandante · capo = parere del capo gruppo (solo se inserito da un utente con gruppo)
-  const stato = (a) => a.cmd || "attesa";
+  // Licenza: dopo il comandante (cmd "si") decide il Cte di Gruppo (cte) · poi l'Aiutante Maggiore la registra (fatta)
+  const stato = (a) => (a.tipo === "licenza" && a.cmd === "si" ? a.cte || "attesa" : a.cmd || "attesa");
+  const stText = (a) => (stato(a) === "attesa" && a.cmd === "si" ? "In attesa Cte di Gruppo" : ST[stato(a)]);
   const stTag = (s, txt = ST[s]) => ` <span class="st ${s}">${txt}</span>`;
-  const canApprove = (p) => isCmd(p) || !!capoDi(p);
-  const daApprovare = () => Store.tables.absences.filter((a) => !a.cmd && byId(a.personId) &&
-    (isCmd(S.me) || (a.gruppo && !a.capo && a.gruppo === capoDi(S.me))));
+  const badge = (a) => (stato(a) === "si" ? "" : stTag(stato(a), stText(a)));
+  const canApprove = (p) => isCmd(p) || !!capoDi(p) || isCte(p);
+  // coda del Cte di Gruppo: solo licenze già accettate dal comandante
+  const daCte = (a) => a.tipo === "licenza" && a.cmd === "si" && !a.cte;
+  const pend = (a) => !!byId(a.personId) && ((!a.cmd && (isCmd(S.me) || (a.gruppo && !a.capo && a.gruppo === capoDi(S.me)))) || (isCte(S.me) && daCte(a)));
+  const daApprovare = () => Store.tables.absences.filter(pend);
+  const qKey = (a) => (a.cmd === "si" ? "cte" : isCmd(S.me) ? "cmd" : "capo");
+  const decide = (a, v) => { const k = qKey(a); a[k] = v; a[k + "At"] = new Date().toISOString(); };
+  const canDel = (a) => isAdmin(S.me) || a.personId === S.me.id;
+  const dt = (s) => (s ? new Date(s).toLocaleString("it-IT", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "");
+  const licOk = (a) => a.tipo === "licenza" && a.cte === "si" && byId(a.personId);
+  const licDaFare = () => Store.tables.absences.filter((a) => licOk(a) && !a.fatta);
+  const giorni = (a) => Math.round((parse(a.al) - parse(a.dal)) / 864e5) + 1;
   const gruppoSeg = (v, attr = "") => `<div class="seg">${Object.entries(GRUPPI).map(([k, l]) =>
     `<label><input type="radio" name="gruppo" value="${k}" ${v === k ? "checked" : ""} ${attr}>${l}</label>`).join("")}</div>`;
 
@@ -141,14 +164,15 @@
   }
 
   const navView = (v) =>
-    [["oggi", "squares-four", "Oggi"], ["personale", "users-three", "Personale"], ["me", "user", "Io"]]
+    [["oggi", "squares-four", "Oggi"], ["personale", "users-three", "Personale"], isAiut(S.me) && ["licenze", "list-checks", "Licenze"], ["me", "user", "Io"]]
+      .filter(Boolean)
       .map(([k, i, l]) => `<button data-act="view" data-v="${k}" class="${v === k ? "on" : ""}">${icon(i)}<span>${l}</span></button>`)
-      .join("") + (v !== "me" ? `<button class="plus" data-act="add" aria-label="Assegna">${icon("plus")}</button>` : "");
+      .join("") + (v !== "me" && isAdmin(S.me) ? `<button class="plus" data-act="add" aria-label="Assegna">${icon("plus")}</button>` : "");
 
   function statusCard(acts, d) {
     const a = acts[0], t = a ? tipo(a) : PRESENTE;
-    const sub = a ? [a.dal !== a.al ? `fino al ${fmt(a.al, { day: "numeric", month: "long" })}` : "", a.dalle ? `dalle ${a.dalle} alle ${a.alle}` : "",
-      a.cmd ? "" : "In attesa di approvazione", a.note ? esc(a.note) : ""].filter(Boolean) : [];
+    const sub = a ? [LIC[a.sub], a.luogo && esc(a.luogo), a.dal !== a.al ? `fino al ${fmt(a.al, { day: "numeric", month: "long" })}` : "", a.dalle ? `dalle ${a.dalle} alle ${a.alle}` : "",
+      stato(a) === "si" ? "" : a.cmd ? stText(a) : "In attesa di approvazione", a.note ? esc(a.note) : ""].filter(Boolean) : [];
     return `
       <div class="shell rise" style="--d:1"><div class="core status" style="--c:${t.c}">
         <div class="eyebrow">Oggi · ${fmt(d, { weekday: "long", day: "numeric", month: "long" })}</div>
@@ -161,8 +185,8 @@
     const t = tipo(a);
     return `<div class="row rise" style="--d:${Math.min(i, 8) + 4};--c:${t.c}">
       <span class="tag">${icon(t.i)}</span>
-      <span class="row-t"><b>${t.l}</b><small>${range(a)}${a.cmd === "si" ? "" : stTag(stato(a))}</small>${a.note ? `<em>${esc(a.note)}</em>` : ""}</span>
-      <button class="icon-btn sm" data-act="del" data-id="${a.id}" aria-label="Elimina">${icon("x")}</button>
+      <span class="row-t"><b>${tl(a)}</b><small>${range(a)}${badge(a)}</small>${a.luogo ? `<em>${esc(a.luogo)}</em>` : ""}${a.note ? `<em>${esc(a.note)}</em>` : ""}</span>
+      ${canDel(a) ? `<button class="icon-btn sm" data-act="del" data-id="${a.id}" aria-label="Elimina">${icon("x")}</button>` : ""}
     </div>`;
   };
 
@@ -185,11 +209,12 @@
     const isToday = d === today();
 
     const rows = (l, d0) => l.map(([p, acts], i) => {
-      const t = tipo(acts[0]), notes = acts.map((x) => x.note).filter(Boolean).join(" · ");
+      const t = tipo(acts[0]), notes = [...acts.map((x) => x.luogo), ...acts.map((x) => x.note)].filter(Boolean).join(" · ");
       const when = acts.map((x) => (x.dalle ? `${x.dalle}–${x.alle}` : x.dal !== x.al ? range(x) : "")).filter(Boolean).join(", ");
+      const w = acts.find((x) => stato(x) === "attesa");
       return `<div class="row tap rise" style="--d:${Math.min(i, 8) + d0};--c:${t.c}" data-act="person" data-id="${p.id}">
         <span class="tag">${icon(t.i)}</span>
-        <span class="row-t"><b>${esc(fullName(p))}</b><small>${[...new Set(acts.map((x) => tipo(x).l))].join(" + ")}${when ? " · " + when : ""}${acts.some((x) => !x.cmd) ? stTag("attesa") : ""}</small>${notes ? `<em>${esc(notes)}</em>` : ""}</span>
+        <span class="row-t"><b>${esc(fullName(p))}</b><small>${[...new Set(acts.map(tl))].join(" + ")}${when ? " · " + when : ""}${w ? stTag("attesa", stText(w)) : ""}</small>${notes ? `<em>${esc(notes)}</em>` : ""}</span>
       </div>`;
     }).join("");
 
@@ -248,7 +273,7 @@
     return `<div class="req rise" style="--d:${Math.min(i, 8) + 1};--c:${t.c}">
       <div class="row">
         <span class="tag">${icon(t.i)}</span>
-        <span class="row-t"><b>${esc(fullName(p))}</b><small>${t.l} · ${range(a)}</small>${a.note ? `<em>${esc(a.note)}</em>` : ""}${info || capo ? `<em>${esc(info)}${capo}</em>` : ""}</span>
+        <span class="row-t"><b>${esc(fullName(p))}</b><small>${tl(a)} · ${range(a)}</small>${a.luogo ? `<em>${esc(a.luogo)}</em>` : ""}${a.note ? `<em>${esc(a.note)}</em>` : ""}${info || capo ? `<em>${esc(info)}${capo}</em>` : ""}</span>
       </div>
       <div class="req-act">
         <button class="ghost" data-act="ok" data-id="${a.id}" data-v="no">${icon("x")}<span>Rifiuta</span></button>
@@ -260,7 +285,36 @@
   function richiesteView() {
     const l = daApprovare().sort((a, b) => a.dal.localeCompare(b.dal));
     return `<h2 class="sec rise">Da approvare<b>${l.length}</b></h2>` +
-      (l.length ? `<div class="list">${l.map(reqRow).join("")}</div>` : `<p class="empty rise" style="--d:1">Nessuna richiesta in attesa</p>`);
+      (l.length ? `<button class="cta wide rise" data-act="okAll"><span>Approva tutto (${l.length})</span><b>${icon("check")}</b></button>
+        <div class="list">${l.map(reqRow).join("")}</div>` : `<p class="empty rise" style="--d:1">Nessuna richiesta in attesa</p>`);
+  }
+
+  // Aiutante Maggiore (desktop 16:9): licenze approvate dal Cte, da registrare; "fatta" = già lavorata
+  function licenzeView() {
+    const all = Store.tables.absences.filter(licOk).sort((a, b) => a.dal.localeCompare(b.dal) || a.at.localeCompare(b.at));
+    const todo = all.filter((a) => !a.fatta).length, f = S.lic;
+    const l = all.filter((a) => (f === "todo" ? !a.fatta : f === "done" ? a.fatta : true));
+    const dn = (s) => fmt(s, { day: "2-digit", month: "2-digit", year: "numeric" });
+    const row = (a, i) => {
+      const p = byId(a.personId), by = a.by !== a.personId && byId(a.by);
+      const iter = [by && `Inserita da ${fullName(by)} ${dt(a.at)}`, a.cmdAt && `Comandante ${dt(a.cmdAt)}`, a.cteAt && `Cte ${dt(a.cteAt)}`].filter(Boolean).join(" · ");
+      return `<div class="lic-r rise${a.fatta ? " done" : ""}" style="--d:${Math.min(i, 8) + 2}">
+        <button class="chk" data-act="fatta" data-id="${a.id}" aria-label="${a.fatta ? "Da fare" : "Registrata"}" aria-pressed="${!!a.fatta}">${icon(a.fatta ? "check-square" : "square")}</button>
+        <span data-l="Nominativo"><b>${esc(fullName(p))}</b><small>${esc(ruolo(p))}</small></span>
+        <span data-l="Tipo">${esc(LIC[a.sub] || "—")}</span>
+        <span data-l="Luogo">${esc(a.luogo || "—")}</span>
+        <span data-l="Dal">${dn(a.dal)}</span>
+        <span data-l="Al">${dn(a.al)}</span>
+        <span data-l="Giorni">${giorni(a)}</span>
+        <span data-l="Note">${esc(a.note || "—")}</span>
+        <span data-l="Iter"><small>${esc(iter)}${a.fatta ? ` · Registrata ${dt(a.fattaAt)}` : ""}</small></span>
+      </div>`;
+    };
+    return `<h2 class="sec rise">Licenze<b>${todo}</b></h2>
+      <div class="seg grp lic-f rise">${[["todo", `Da fare ${todo}`], ["done", `Fatte ${all.length - todo}`], ["all", `Tutte ${all.length}`]].map(([k, t]) =>
+        `<button data-act="lic" data-f="${k}" class="${f === k ? "on" : ""}">${t}</button>`).join("")}</div>
+      ${l.length ? `<div class="lic-h"><span></span><span>Nominativo</span><span>Tipo</span><span>Luogo</span><span>Dal</span><span>Al</span><span>Giorni</span><span>Note</span><span>Iter</span></div>
+        <div class="list">${l.map(row).join("")}</div>` : `<p class="empty rise" style="--d:1">${f === "done" ? "Nessuna licenza registrata" : "Nessuna licenza da registrare"}</p>`}`;
   }
 
   function render(anim) {
@@ -271,10 +325,12 @@
       app.innerHTML = authView();
       return;
     }
-    const adm = isAdmin(S.me), v = adm ? S.view : "me";
-    app.innerHTML = header() + ({ oggi: oggiView, personale: personaleView, richieste: richiesteView }[v] || meView)();
-    nav.hidden = !adm;
-    if (adm) nav.innerHTML = navView(v);
+    const staff = isStaff(S.me), views = { oggi: oggiView, personale: personaleView, richieste: richiesteView, ...(isAiut(S.me) && { licenze: licenzeView }) };
+    const v = staff && views[S.view] ? S.view : "me";
+    app.classList.toggle("wide", v === "licenze");
+    app.innerHTML = header() + (views[v] || meView)();
+    nav.hidden = !staff;
+    if (staff) nav.innerHTML = navView(v);
     // badge sull'icona dell'app installata (dove supportato): richieste da approvare
     navigator.setAppBadge?.(canApprove(S.me) ? daApprovare().length : 0)?.catch(() => {});
     S.oraSig = oraSig();
@@ -292,28 +348,30 @@
     sheet(`
       <div class="sh-head"><span class="av lg" style="--c:${statusOf(me.id, today()).c}">${initials(me)}</span>
         <div><b>${esc(me.nome)} ${esc(me.cognome)}</b><small>${esc(ruolo(me) || "Sq. Mantenimento · H7")}</small></div></div>
-      ${isAdmin(me) ? "" : `<div class="eyebrow grp-l">Gruppo</div>${gruppoSeg(me.gruppo, 'data-change="gruppo"')}`}
+      ${isStaff(me) ? "" : `<div class="eyebrow grp-l">Gruppo</div>${gruppoSeg(me.gruppo, 'data-change="gruppo"')}`}
       <button class="ghost wide" data-act="logout">${icon("sign-out")}<span>Esci</span></button>`);
   }
 
   function personSheet(id) {
     const p = byId(id);
     if (!p) return closeSheet();
-    const s = statusOf(id, today()), mine = upcoming(id), self = id === S.me.id;
-    // admin, capi ed eliminazione: solo il comandante
+    const s = statusOf(id, today()), mine = upcoming(id), self = id === S.me.id, adm = isAdmin(S.me);
+    // admin, capi, funzioni (Cte/Aiutante) ed eliminazione: solo il comandante
     const cmdTools = !isCmd(S.me) ? "" : `
         <button data-act="admin" data-id="${id}" class="${p.admin ? "on" : ""}" ${self ? "disabled" : ""}>${icon("crown")}<span>Admin</span></button>
         ${p.admin && !self ? Object.entries(GRUPPI).map(([k, l]) =>
           `<button data-act="capo" data-id="${id}" data-g="${k}" class="${p.capo === k ? "on" : ""}">${icon("star")}<span>Capo ${l}</span></button>`).join("") : ""}
+        ${self ? "" : Object.entries(FN).map(([k, l]) =>
+          `<button data-act="fn" data-id="${id}" data-f="${k}" class="${p.fn === k ? "on" : ""}">${icon(k === "cte" ? "seal-check" : "clipboard-text")}<span>${l}</span></button>`).join("")}
         <button class="danger" data-act="remove" data-id="${id}" ${self ? "disabled" : ""}>${icon("trash")}<span>Elimina</span></button>`;
     sheet(`
       <div class="sh-head"><span class="av lg" style="--c:${s.c}">${initials(p)}</span>
         <div><b>${esc(fullName(p))}</b><small>${[s.l, ruolo(p)].filter(Boolean).join(" · ")}</small></div></div>
-      <button class="cta wide" data-act="add" data-who="${id}"><span>Nuovo impegno</span><b>${icon("plus")}</b></button>
+      ${adm || self ? `<button class="cta wide" data-act="add" data-who="${id}"><span>Nuovo impegno</span><b>${icon("plus")}</b></button>` : ""}
       ${mine.length ? `<div class="list mt">${mine.map(actRow).join("")}</div>` : ""}
-      <div class="tools">
+      ${adm ? `<div class="tools">
         <button data-act="reset" data-id="${id}">${icon("key")}<span>Reset password</span></button>${cmdTools}
-      </div>`);
+      </div>` : ""}`);
     S.reopen = () => personSheet(id);
   }
 
@@ -336,6 +394,10 @@
         </div>` : `<input type="hidden" name="p" value="${p.id}">`}
         <div class="tipi">${Object.entries(TIPI).map(([k, t]) =>
           `<label class="tipo" style="--c:${t.c}"><input type="radio" name="tipo" value="${k}">${icon(t.i)}<span>${t.l}</span></label>`).join("")}</div>
+        <div class="lic">
+          <select name="sub" aria-label="Tipo di licenza"><option value="">Tipo di licenza</option>${Object.entries(LIC).map(([k, l]) => `<option value="${k}">${l}</option>`).join("")}</select>
+          <input name="luogo" placeholder="Luogo di fruizione" autocapitalize="words" enterkeyhint="next">
+        </div>
         <div class="dates">
           <label><small>Dal</small><input type="date" name="dal" value="${d}"></label>
           <label class="d-al"><small>Al</small><input type="date" name="al" value="${d}" min="${d}"></label>
@@ -372,7 +434,7 @@
   function login(p) {
     localStorage.setItem(KEY, p.id);
     S.me = p;
-    S.view = isAdmin(p) ? "oggi" : "me";
+    S.view = home(p);
     render(true);
   }
 
@@ -412,24 +474,28 @@
     const ids = [...f.querySelectorAll("[name=p]")].filter((c) => c.type === "hidden" || c.checked).map((c) => c.value);
     const t = f.elements.tipo.value, note = f.elements.note.value.trim(), dal = f.elements.dal.value;
     const orario = t === "orario", dalle = f.elements.dalle.value, alle = f.elements.alle.value;
+    const lic = t === "licenza", sub = f.elements.sub.value, luogo = f.elements.luogo.value.trim();
     const al = orario || f.elements.al.value < dal ? dal : f.elements.al.value;
     if (!ids.length) { f.querySelector(".chi")?.classList.add("open"); throw new Error("Scegli chi"); }
     if (!t) throw new Error("Scegli il tipo");
+    if (lic && !sub) throw new Error("Scegli il tipo di licenza");
     if (!dal) throw new Error("Scegli la data");
+    if (lic && MEDICA.includes(sub) && dal > addDays(today(), 1)) throw new Error("Riposo medico e convalescenza: al massimo dal giorno dopo");
     if (orario && !(dalle && alle && dalle < alle)) throw new Error("Scegli le ore: dalle … alle");
-    if (t === "altro" && !note) throw new Error("Scrivi una nota");
+    if ((t === "altro" || (lic && sub === "altra")) && !note) throw new Error("Scrivi una nota");
     if (!isAdmin(S.me) && ids.some((id) => id !== S.me.id)) throw new Error("Non autorizzato");
     const r = { tipo: t, dal, al, note, by: S.me.id, at: new Date().toISOString() };
     if (orario) Object.assign(r, { dalle, alle });
+    if (lic) Object.assign(r, { sub, ...(luogo && { luogo }) });
     if (isCmd(S.me)) r.cmd = "si"; // il comandante non attende approvazione
     else if (!isAdmin(S.me) && grp(S.me)) r.gruppo = grp(S.me); // utente: lo vede anche il capo del suo gruppo
     await Store.mutate("absences", (l) => {
       ids.forEach((pid) => l.push({ id: uid(), personId: pid, ...r }));
-    }, `${TIPI[t].l} ${dal}${al !== dal ? "→" + al : ""}${orario ? ` ${dalle}-${alle}` : ""} ×${ids.length}`);
+    }, `${TIPI[t].l}${lic ? " " + LIC[sub] : ""} ${dal}${al !== dal ? "→" + al : ""}${orario ? ` ${dalle}-${alle}` : ""} ×${ids.length}`);
     const back = S.back;
     render();
     back ? back() : closeSheet();
-    toast(r.cmd ? "Salvato" : "Inviato per approvazione");
+    toast(r.cmd ? (lic ? "Salvato · in attesa del Cte di Gruppo" : "Salvato") : "Inviato per approvazione");
   }
 
   async function refresh() {
@@ -468,14 +534,41 @@
       afterChange();
     }),
     ok: (t) => run(t, async () => {
-      const k = isCmd(S.me) ? "cmd" : "capo", v = t.dataset.v;
+      const v = t.dataset.v;
       await Store.mutate("absences", (l) => {
         const a = l.find((x) => x.id === t.dataset.id);
-        if (!a) throw new Error("Richiesta non trovata");
-        a[k] = v;
-      }, `${k} ${v}`);
+        if (!a || !pend(a)) throw new Error("Richiesta non più in attesa");
+        decide(a, v);
+      }, `approvazione ${v}`);
       afterChange();
       toast(v === "si" ? "Accettato" : "Rifiutato");
+    }),
+    okAll: (t) => run(t, async () => {
+      const ids = new Set(daApprovare().map((a) => a.id));
+      const n = await Store.mutate("absences", (l) => {
+        const m = l.filter((a) => ids.has(a.id) && pend(a));
+        if (!m.length) throw new Error("Niente da approvare");
+        m.forEach((a) => decide(a, "si"));
+        return m.length;
+      }, `approva tutto ×${ids.size}`);
+      afterChange();
+      toast(n + (n === 1 ? " approvata" : " approvate"));
+    }),
+    lic(t) { S.lic = t.dataset.f; render(); },
+    fatta: (t) => run(t, async () => {
+      const done = await Store.mutate("absences", (l) => {
+        const a = l.find((x) => x.id === t.dataset.id);
+        if (!a || !licOk(a)) throw new Error("Licenza non trovata");
+        if (a.fatta) { delete a.fatta; delete a.fattaAt; } else { a.fatta = true; a.fattaAt = new Date().toISOString(); }
+        return !!a.fatta;
+      }, "licenza registrata");
+      render();
+      toast(done ? "Licenza registrata" : "Rimessa da fare");
+    }),
+    fn: (t) => run(t, async () => {
+      const k = t.dataset.f;
+      await editPerson(t.dataset.id, (x) => { if (x.fn === k) delete x.fn; else x.fn = k; }, `funzione ${k}`);
+      afterChange();
     }),
     reset: (t) => run(t, async () => {
       await editPerson(t.dataset.id, (x) => { delete x.hash; delete x.salt; }, "reset password");
@@ -530,12 +623,17 @@
     });
     if (t.dataset.change === "all") t.form.querySelectorAll("[name=p]").forEach((c) => (c.checked = t.checked));
     if (t.closest(".chi")) chiSync(t.closest(".chi"));
-    if (t.name === "dal" && t.form.id === "addForm") {
-      const al = t.form.elements.al;
-      al.min = t.value;
-      if (al.value < t.value) al.value = t.value;
-    }
+    if (t.form?.id === "addForm" && ["dal", "sub", "tipo"].includes(t.name)) dateSync(t.form);
   });
+
+  // "Al" non prima di "Dal"; riposo medico e convalescenza: "Dal" al massimo domani
+  function dateSync(f) {
+    const { dal, al, tipo, sub } = f.elements;
+    dal.max = tipo.value === "licenza" && MEDICA.includes(sub.value) ? addDays(today(), 1) : "";
+    if (dal.max && dal.value > dal.max) dal.value = dal.max;
+    al.min = dal.value;
+    if (al.value < dal.value) al.value = dal.value;
+  }
 
   document.addEventListener("input", (e) => {
     if (e.target.dataset.input !== "q") return;
@@ -562,7 +660,7 @@
       return;
     }
     S.me = byId(localStorage.getItem(KEY)) || null;
-    S.view = isAdmin(S.me) ? "oggi" : "me";
+    S.view = home(S.me);
     S.day = today();
     render(true);
   }
