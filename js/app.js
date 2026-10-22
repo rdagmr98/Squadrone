@@ -16,8 +16,8 @@
   // Funzioni assegnate solo dal comandante (campo fn sulla persona)
   const FN = { cte: "Cte di Gruppo", aiutante: "Aiutante Maggiore" };
   // Tipi di licenza (campo sub); riposo medico e convalescenza non si inseriscono oltre il giorno prima
-  const LIC = { ordinaria: "Ordinaria", straordinaria: "Straordinaria", festivita: "Recupero festività", l937: "937", compensativo: "Recupero compensativo",
-    riposo: "Riposo medico", convalescenza: "Convalescenza", altra: "Altra" };
+  const LIC = { ordinaria: "Licenza ordinaria", straordinaria: "Licenza straordinaria", festivita: "Recupero festività", l937: "Riposo L. 937/77",
+    compensativo: "Recupero compensativo", l104: "Permesso L. 104/92", riposo: "Riposo medico", convalescenza: "Licenza di convalescenza", altra: "Altro" };
   const MEDICA = ["riposo", "convalescenza"];
   const KEY = "sq_uid";
   const S = { me: null, view: "me", day: null, grp: "", lic: "todo", reopen: null, back: null, last: 0 };
@@ -41,9 +41,12 @@
   const fullName = (p) => `${p.cognome} ${p.nome}`;
   const initials = (p) => ((p.nome[0] || "") + (p.cognome[0] || "")).toUpperCase();
   const byId = (id) => Store.tables.personnel.find((p) => p.id === id);
-  const people = () => [...Store.tables.personnel].sort((a, b) => fullName(a).localeCompare(fullName(b), "it"));
+  const byName = (l) => l.sort((a, b) => fullName(a).localeCompare(fullName(b), "it"));
+  // effettivi: Cte di Gruppo e Aiutante Maggiore sono figure di controllo, fuori da conteggi, elenchi e assegnazioni
+  const people = () => byName(Store.tables.personnel.filter((p) => !FN[p.fn]));
+  const controllo = () => byName(Store.tables.personnel.filter((p) => FN[p.fn]));
   const tipo = (a) => TIPI[a.tipo] || TIPI.altro;
-  const tl = (a) => tipo(a).l + (LIC[a.sub] ? " · " + LIC[a.sub] : "");
+  const tl = (a) => LIC[a.sub] || tipo(a).l;
   // i rifiutati (dal comandante o, per le licenze, dal Cte di Gruppo) non contano come assenza, ma restano visibili in "Prossimi" a chi li ha chiesti
   const actsOn = (pid, d) => Store.tables.absences.filter((a) => a.personId === pid && a.cmd !== "no" && a.cte !== "no" && a.dal <= d && d <= a.al);
   const upcoming = (pid) => Store.tables.absences.filter((a) => a.personId === pid && a.al >= today()).sort((a, b) => a.dal.localeCompare(b.dal));
@@ -171,12 +174,12 @@
 
   function statusCard(acts, d) {
     const a = acts[0], t = a ? tipo(a) : PRESENTE;
-    const sub = a ? [LIC[a.sub], a.luogo && esc(a.luogo), a.dal !== a.al ? `fino al ${fmt(a.al, { day: "numeric", month: "long" })}` : "", a.dalle ? `dalle ${a.dalle} alle ${a.alle}` : "",
+    const sub = a ? [a.luogo && esc(a.luogo), a.dal !== a.al ? `fino al ${fmt(a.al, { day: "numeric", month: "long" })}` : "", a.dalle ? `dalle ${a.dalle} alle ${a.alle}` : "",
       stato(a) === "si" ? "" : a.cmd ? stText(a) : "In attesa di approvazione", a.note ? esc(a.note) : ""].filter(Boolean) : [];
     return `
       <div class="shell rise" style="--d:1"><div class="core status" style="--c:${t.c}">
         <div class="eyebrow">Oggi · ${fmt(d, { weekday: "long", day: "numeric", month: "long" })}</div>
-        <div class="st-main"><span class="st-ic">${icon(t.i)}</span><span class="st-l">${t.l}</span></div>
+        <div class="st-main"><span class="st-ic">${icon(t.i)}</span><span class="st-l">${a ? tl(a) : t.l}</span></div>
         ${sub.length ? `<div class="st-sub">${sub.join("<br>")}</div>` : ""}
       </div></div>`;
   }
@@ -252,18 +255,20 @@
   }
 
   function personaleView() {
-    const d = today(), all = people();
-    return `
-      <div class="search rise">${icon("magnifying-glass")}<input type="search" placeholder="Cerca" data-input="q" autocomplete="off"></div>
-      <h2 class="sec rise" style="--d:1">Personale<b>${all.length}</b></h2>
-      <div class="list">${all.map((p, i) => {
-        const s = statusOf(p.id, d);
-        return `<div class="row tap rise" style="--d:${Math.min(i, 8) + 2};--c:${s.c}" data-act="person" data-id="${p.id}" data-name="${esc(norm(fullName(p) + " " + p.nome + " " + p.cognome))}">
+    const d = today(), all = people(), ctl = controllo();
+    const pRow = (p, i) => {
+      const s = statusOf(p.id, d);
+      return `<div class="row tap rise" style="--d:${Math.min(i, 8) + 2};--c:${s.c}" data-act="person" data-id="${p.id}" data-name="${esc(norm(fullName(p) + " " + p.nome + " " + p.cognome))}">
           <span class="av">${initials(p)}</span>
           <span class="row-t"><b>${esc(fullName(p))}${isAdmin(p) ? " " + icon("crown") : ""}</b><small>${[s.l, ruolo(p)].filter(Boolean).join(" · ")}</small></span>
           ${icon("caret-right")}
         </div>`;
-      }).join("")}</div>`;
+    };
+    return `
+      <div class="search rise">${icon("magnifying-glass")}<input type="search" placeholder="Cerca" data-input="q" autocomplete="off"></div>
+      <h2 class="sec rise" style="--d:1">Personale<b>${all.length}</b></h2>
+      <div class="list">${all.map(pRow).join("")}</div>
+      ${ctl.length ? `<h2 class="sec rise" style="--d:2">Funzioni di controllo<b>${ctl.length}</b></h2><div class="list">${ctl.map(pRow).join("")}</div>` : ""}`;
   }
 
   function reqRow(a, i) {
@@ -297,17 +302,18 @@
     const dn = (s) => fmt(s, { day: "2-digit", month: "2-digit", year: "numeric" });
     const row = (a, i) => {
       const p = byId(a.personId), by = a.by !== a.personId && byId(a.by);
-      const iter = [by && `Inserita da ${fullName(by)} ${dt(a.at)}`, a.cmdAt && `Comandante ${dt(a.cmdAt)}`, a.cteAt && `Cte ${dt(a.cteAt)}`].filter(Boolean).join(" · ");
+      const iter = [by && `Inserita da ${fullName(by)} ${dt(a.at)}`, a.cmdAt && `Comandante ${dt(a.cmdAt)}`, a.cteAt && `Cte di Gruppo ${dt(a.cteAt)}`, a.fatta && `Registrata ${dt(a.fattaAt)}`];
+      // ponytail: celle vuote senza "—": su mobile spariscono (:empty), su desktop il trattino lo mette il CSS
       return `<div class="lic-r rise${a.fatta ? " done" : ""}" style="--d:${Math.min(i, 8) + 2}">
         <button class="chk" data-act="fatta" data-id="${a.id}" aria-label="${a.fatta ? "Da fare" : "Registrata"}" aria-pressed="${!!a.fatta}">${icon(a.fatta ? "check-square" : "square")}</button>
         <span data-l="Nominativo"><b>${esc(fullName(p))}</b><small>${esc(ruolo(p))}</small></span>
-        <span data-l="Tipo">${esc(LIC[a.sub] || "—")}</span>
-        <span data-l="Luogo">${esc(a.luogo || "—")}</span>
+        <span data-l="Tipo">${esc(LIC[a.sub] || "")}</span>
+        <span data-l="Luogo">${esc(a.luogo || "")}</span>
         <span data-l="Dal">${dn(a.dal)}</span>
         <span data-l="Al">${dn(a.al)}</span>
         <span data-l="Giorni">${giorni(a)}</span>
-        <span data-l="Note">${esc(a.note || "—")}</span>
-        <span data-l="Iter"><small>${esc(iter)}${a.fatta ? ` · Registrata ${dt(a.fattaAt)}` : ""}</small></span>
+        <span data-l="Note">${esc(a.note || "")}</span>
+        <span data-l="Iter">${iter.filter(Boolean).map((x) => `<small>${esc(x)}</small>`).join("")}</span>
       </div>`;
     };
     return `<h2 class="sec rise">Licenze<b>${todo}</b></h2>
@@ -395,7 +401,7 @@
         <div class="tipi">${Object.entries(TIPI).map(([k, t]) =>
           `<label class="tipo" style="--c:${t.c}"><input type="radio" name="tipo" value="${k}">${icon(t.i)}<span>${t.l}</span></label>`).join("")}</div>
         <div class="lic">
-          <select name="sub" aria-label="Tipo di licenza"><option value="">Tipo di licenza</option>${Object.entries(LIC).map(([k, l]) => `<option value="${k}">${l}</option>`).join("")}</select>
+          <select name="sub" aria-label="Tipo di licenza" required><option value="">Tipo di licenza</option>${Object.entries(LIC).map(([k, l]) => `<option value="${k}">${l}</option>`).join("")}</select>
           <input name="luogo" placeholder="Luogo di fruizione" autocapitalize="words" enterkeyhint="next">
         </div>
         <div class="dates">
@@ -491,7 +497,7 @@
     else if (!isAdmin(S.me) && grp(S.me)) r.gruppo = grp(S.me); // utente: lo vede anche il capo del suo gruppo
     await Store.mutate("absences", (l) => {
       ids.forEach((pid) => l.push({ id: uid(), personId: pid, ...r }));
-    }, `${TIPI[t].l}${lic ? " " + LIC[sub] : ""} ${dal}${al !== dal ? "→" + al : ""}${orario ? ` ${dalle}-${alle}` : ""} ×${ids.length}`);
+    }, `${lic ? LIC[sub] : TIPI[t].l} ${dal}${al !== dal ? "→" + al : ""}${orario ? ` ${dalle}-${alle}` : ""} ×${ids.length}`);
     const back = S.back;
     render();
     back ? back() : closeSheet();

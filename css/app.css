@@ -182,7 +182,7 @@ input[type=date]::-webkit-date-and-time-value, input[type=time]::-webkit-date-an
   display: grid; place-items: center; width: 56px; height: 56px; border-radius: 18px; font-size: 28px;
   color: var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); border: 1px solid color-mix(in srgb, var(--c) 30%, transparent);
 }
-.st-l { font-size: 34px; font-weight: 600; letter-spacing: -.035em; }
+.st-l { font-size: clamp(24px, 8vw, 34px); font-weight: 600; letter-spacing: -.035em; line-height: 1.1; min-width: 0; }
 .st-sub { margin-top: 14px; color: var(--mute); font-size: 14px; overflow-wrap: anywhere; }
 .shell + .cta { margin-top: 12px; }
 
@@ -355,26 +355,31 @@ input[type=date]::-webkit-date-and-time-value, input[type=time]::-webkit-date-an
 .lic { display: none; }
 .add:has([value=licenza]:checked) .lic { display: grid; gap: 8px; }
 select {
-  display: block; width: 100%; min-width: 0; min-height: 52px; padding: 14px 18px;
-  border-radius: 16px; border: 1px solid var(--line); background: var(--faint);
-  font-size: 16px; outline: none; -webkit-appearance: none; appearance: none;
+  display: block; width: 100%; min-width: 0; min-height: 52px; padding: 14px 46px 14px 18px;
+  border-radius: 16px; border: 1px solid var(--line); font-size: 16px; outline: none; -webkit-appearance: none; appearance: none;
+  background: var(--faint) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'%3E%3Cpath d='M56 96l72 72 72-72' fill='none' stroke='%23eef2f7' stroke-opacity='.52' stroke-width='18' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 18px center / 16px;
 }
-select:focus { border-color: rgba(96, 165, 250, .55); background: rgba(96, 165, 250, .05); }
+select:has(option[value=""]:checked) { color: rgba(238, 242, 247, .35); }
+select:focus { border-color: rgba(96, 165, 250, .55); background-color: rgba(96, 165, 250, .05); }
 option { background: #0b0d12; color: var(--ink); }
 .cta.wide { margin-bottom: 14px; }
 
 /* licenze (Aiutante Maggiore): card su mobile, tabella 16:9 su desktop */
 .lic-h { display: none; }
 .lic-r {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; padding: 12px 12px 12px 64px; position: relative;
+  display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 10px 20px; padding: 14px 14px 14px 64px; position: relative;
   border-radius: 20px; background: rgba(255, 255, 255, .03); border: 1px solid rgba(255, 255, 255, .055);
   transition: opacity .3s var(--ease);
 }
 .lic-r.done { opacity: .5; }
-.lic-r > span { min-width: 0; overflow-wrap: anywhere; display: grid; }
+.lic-r > span { min-width: 0; overflow-wrap: anywhere; display: grid; gap: 2px; align-content: start; }
+.lic-r > span:empty { display: none; }
+.lic-r > span:is([data-l=Dal], [data-l=Al]) { white-space: nowrap; overflow-wrap: normal; }
 .lic-r > span::before { content: attr(data-l); font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--mute); }
-.lic-r > span:first-of-type { flex: 1 0 100%; }
-.lic-r > span:first-of-type::before, .lic-r > span:last-child::before { display: none; }
+.lic-r > span:is([data-l=Nominativo], [data-l=Tipo], [data-l=Luogo], [data-l=Note], [data-l=Iter]) { grid-column: 1 / -1; }
+.lic-r > span:is([data-l=Nominativo], [data-l=Iter])::before { display: none; }
+.lic-r > span[data-l=Nominativo] b { font-size: 16px; }
+.lic-r > span[data-l=Iter] { padding-top: 10px; border-top: 1px solid var(--line); }
 .lic-r small { color: var(--mute); font-size: 12px; }
 .chk {
   position: absolute; left: 8px; top: 8px; display: grid; place-items: center; width: 48px; height: 48px;
@@ -391,10 +396,18 @@ option { background: #0b0d12; color: var(--ink); }
     display: grid; grid-template-columns: 48px minmax(150px, 1.3fr) 1fr 1.1fr 100px 100px 60px 1.4fr 1.6fr;
     align-items: center; gap: 14px;
   }
-  .lic-h { padding: 0 12px 8px; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--mute); }
-  .lic-r { padding: 8px 12px; }
-  .lic-r > span:first-of-type { flex: none; }
+  .lic-h {
+    position: sticky; top: 0; z-index: 1; padding: calc(var(--top) + 10px) 12px 10px; background: var(--bg);
+    border-bottom: 1px solid var(--line); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--mute);
+  }
+  .lic-r { padding: 10px 12px; border-radius: 16px; }
+  .lic-r:hover { background: rgba(255, 255, 255, .05); }
+  .lic-r > span:is([data-l]) { grid-column: auto; }
   .lic-r > span::before { display: none; }
+  .lic-r > span:empty { display: grid; }
+  .lic-r > span:empty::after { content: "—"; color: var(--mute); }
+  .lic-r > span[data-l=Iter] { padding-top: 0; border-top: 0; }
+  .lic-r > span[data-l=Nominativo] b { font-size: inherit; }
   .chk { position: static; }
 }
 
