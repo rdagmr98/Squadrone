@@ -63,7 +63,8 @@
   const isCte = (p) => !!p && p.fn === "cte";
   const isAiut = (p) => !!p && p.fn === "aiutante";
   const isStaff = (p) => isAdmin(p) || !!(p && FN[p.fn]); // vede Oggi e Personale come il comandante
-  const grp = (p) => (isAdmin(p) || FN[p.fn] || !GRUPPI[p.gruppo] ? null : p.gruppo);
+  // il capo conta nel gruppo che comanda (totali Oggi); gli altri admin e le funzioni restano fuori
+  const grp = (p) => capoDi(p) || (isAdmin(p) || FN[p.fn] || !GRUPPI[p.gruppo] ? null : p.gruppo);
   const capoDi = (p) => (p && p.admin && GRUPPI[p.capo] ? p.capo : null);
   const ruolo = (p) => isCmd(p) ? "Comandante" : [capoDi(p) ? "Capo " + GRUPPI[p.capo] : p.admin ? "Admin" : "", FN[p.fn]].filter(Boolean).join(" · ") || GRUPPI[grp(p)] || "";
   const home = (p) => (isAiut(p) ? "licenze" : isStaff(p) ? "oggi" : "me");
