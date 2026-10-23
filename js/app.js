@@ -660,6 +660,8 @@
         const a = l.find((x) => x.id === t.dataset.id);
         if (!a || !pend(a)) throw new Error("Richiesta non più in attesa");
         decide(a, v);
+        // guardia rifiutata dal comandante: niente RCO del giorno dopo
+        if (a.cmd === "no") l.forEach((x) => { if (x.rif === a.id) { x.cmd = "no"; x.cmdAt = a.cmdAt; } });
       }, `approvazione ${v}`);
       afterChange();
       toast(v === "si" ? "Accettato" : "Rifiutato");
