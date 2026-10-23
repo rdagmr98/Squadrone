@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url";
 
 // ponytail: regole copiate da js/app.js (TIPI, LIC, isCmd, capoDi, stato, stText, pend, licOk): se cambiano lì, aggiornare qui
 const CMD = "mubqvhx6r8lx4o";
-const TIPI = { licenza: "Licenza", guardia: "Guardia", polveriera: "Polveriera", stormo72: "72° Stormo", orario: "Assenza oraria", altro: "Altro" };
+const TIPI = { licenza: "Licenza", guardia: "Guardia", polveriera: "Polveriera", stormo72: "72° Stormo", orario: "Assenza oraria", altro: "Altro", rco: "RCO" };
 const LIC = { ordinaria: "Licenza ordinaria", straordinaria: "Licenza straordinaria", festivita: "Recupero festività", l937: "Riposo L. 937/77",
   compensativo: "Recupero compensativo", l104: "Permesso L. 104/92", riposo: "Riposo medico", convalescenza: "Licenza di convalescenza", altra: "Altro" };
 const GRUPPI = { officina: 1, tecnica: 1 };
@@ -17,7 +17,7 @@ const capoDi = (p) => (p.admin && GRUPPI[p.capo] ? p.capo : null);
 const stato = (a) => (a.tipo === "licenza" && a.cmd === "si" ? a.cte || "attesa" : a.cmd || "attesa");
 const daCte = (a) => a.tipo === "licenza" && a.cmd === "si" && !a.cte;
 const pendFor = (p, a) => (!a.cmd && (isCmd(p) || (a.gruppo && !a.capo && a.gruppo === capoDi(p)))) || (p.fn === "cte" && daCte(a));
-const licOk = (a) => a.tipo === "licenza" && a.cte === "si" && !a.fatta;
+const licOk = (a) => a.tipo === "licenza" && a.cmd === "si" && a.cte !== "no" && !a.fatta; // all'Aiutante già dopo il comandante
 const dm = (s) => `${s.slice(8, 10)}/${s.slice(5, 7)}`;
 const what = (a) => `${LIC[a.sub] || TIPI[a.tipo] || "Altro"} ${a.dal === a.al ? dm(a.dal) : `${dm(a.dal)}–${dm(a.al)}`}${a.dalle ? ` ${a.dalle}–${a.alle}` : ""}`;
 const esito = (a) => (stato(a) === "si" ? "Richiesta accettata" : stato(a) === "no" ? "Richiesta rifiutata" : a.cmd === "si" ? "Approvata dal comandante, ora al Cte di Gruppo" : "");

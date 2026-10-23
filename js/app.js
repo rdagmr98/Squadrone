@@ -8,7 +8,9 @@
     polveriera: { l: "Polveriera", i: "warehouse", c: "#fb7185" },
     stormo72: { l: "72° Stormo", i: "airplane-in-flight", c: "#60a5fa" },
     orario: { l: "Assenza oraria", i: "clock-countdown", c: "#fb923c" },
-    altro: { l: "Altro", i: "note-pencil", c: "#a78bfa" }
+    altro: { l: "Altro", i: "note-pencil", c: "#a78bfa" },
+    // recupero compensativo obbligatorio: creato in automatico col giorno dopo la guardia, non si sceglie a mano
+    rco: { l: "RCO", i: "bed", c: "#a3e635" }
   };
   const PRESENTE = { l: "Presente", i: "check-circle", c: "#34d399" };
   const GRUPPI = { officina: "Officina", tecnica: "Sezione Tecnica" };
@@ -80,9 +82,22 @@
   const decide = (a, v) => { const k = qKey(a); a[k] = v; a[k + "At"] = new Date().toISOString(); };
   const canDel = (a) => isAdmin(S.me) || a.personId === S.me.id;
   const dt = (s) => (s ? new Date(s).toLocaleString("it-IT", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "");
-  const licOk = (a) => a.tipo === "licenza" && a.cte === "si" && byId(a.personId);
-  const licDaFare = () => Store.tables.absences.filter((a) => licOk(a) && !a.fatta);
+  // all'Aiutante appena approvata dal comandante; il parere del Cte di Gruppo è mostrato a parte
+  const licOk = (a) => a.tipo === "licenza" && a.cmd === "si" && byId(a.personId);
+  const daFare = (a) => !a.fatta && a.cte !== "no";
   const giorni = (a) => Math.round((parse(a.al) - parse(a.dal)) / 864e5) + 1;
+  // computabili = giorni lavorativi: esclusi sabato, domenica, festivi nazionali, Pasquetta e Santa Rosa (4/9, patrono di Viterbo)
+  const FEST = ["01-01", "01-06", "04-25", "05-01", "06-02", "08-15", "09-04", "11-01", "12-08", "12-25", "12-26"];
+  const pasquetta = (y) => { // Pasqua gregoriana (Meeus) + 1 giorno
+    const a = y % 19, b = Math.floor(y / 100), c = y % 100, h = (19 * a + b - Math.floor(b / 4) - Math.floor((b - Math.floor((b + 8) / 25) + 1) / 3) + 15) % 30;
+    const l = (32 + 2 * (b % 4) + 2 * Math.floor(c / 4) - h - (c % 4)) % 7, n = h + l - 7 * Math.floor((a + 11 * h + 22 * l) / 451) + 114;
+    return iso(new Date(y, Math.floor(n / 31) - 1, (n % 31) + 2));
+  };
+  const computabili = (a) => {
+    let n = 0;
+    for (let s = a.dal; s <= a.al; s = addDays(s, 1)) { const d = parse(s); if (d.getDay() % 6 && !FEST.includes(s.slice(5)) && s !== pasquetta(d.getFullYear())) n++; }
+    return n;
+  };
   const gruppoSeg = (v, attr = "") => `<div class="seg">${Object.entries(GRUPPI).map(([k, l]) =>
     `<label><input type="radio" name="gruppo" value="${k}" ${v === k ? "checked" : ""} ${attr}>${l}</label>`).join("")}</div>`;
 
@@ -318,15 +333,17 @@
         <div class="list">${l.map(reqRow).join("")}</div>` : `<p class="empty rise" style="--d:1">Nessuna richiesta in attesa</p>`);
   }
 
-  // Aiutante Maggiore (desktop 16:9): licenze approvate dal Cte, da registrare; "fatta" = già lavorata
+  // Aiutante Maggiore (desktop 16:9): licenze approvate dal comandante, da registrare; "fatta" = già lavorata
+  // rifiutate dal Cte di Gruppo: non da fare, restano solo in "Tutte"
   const dn = (s) => fmt(s, { day: "2-digit", month: "2-digit", year: "numeric" });
+  const CTE = { si: "Approvata", no: "Rifiutata", attesa: "In attesa" };
   const licList = () => {
     const all = Store.tables.absences.filter(licOk).sort((a, b) => a.dal.localeCompare(b.dal) || a.at.localeCompare(b.at)), f = S.lic;
-    return { all, l: all.filter((a) => (f === "todo" ? !a.fatta : f === "done" ? a.fatta : true)) };
+    return { all, l: all.filter((a) => (f === "todo" ? daFare(a) : f === "done" ? a.fatta : true)) };
   };
 
   function licenzeView() {
-    const { all, l } = licList(), todo = all.filter((a) => !a.fatta).length, f = S.lic;
+    const { all, l } = licList(), todo = all.filter(daFare).length, fatte = all.filter((a) => a.fatta).length, f = S.lic;
     const row = (a, i) => {
       const p = byId(a.personId), by = a.by !== a.personId && byId(a.by);
       const iter = [by && `Inserita da ${fullName(by)} ${dt(a.at)}`, a.cmdAt && `Comandante ${dt(a.cmdAt)}`, a.cteAt && `Cte di Gruppo ${dt(a.cteAt)}`, a.fatta && `Registrata ${dt(a.fattaAt)}`];
@@ -339,36 +356,43 @@
         <span data-l="Dal">${dn(a.dal)}</span>
         <span data-l="Al">${dn(a.al)}</span>
         <span data-l="Giorni">${giorni(a)}</span>
+        <span data-l="Cte di Gruppo">${stTag(a.cte || "attesa", CTE[a.cte || "attesa"])}</span>
         <span data-l="Note">${esc(a.note || "")}</span>
         <span data-l="Iter">${iter.filter(Boolean).map((x) => `<small>${esc(x)}</small>`).join("")}</span>
       </div>`;
     };
     return `<h2 class="sec rise">Licenze<b>${todo}</b></h2>
-      <div class="seg grp lic-f rise">${[["todo", `Da fare ${todo}`], ["done", `Fatte ${all.length - todo}`], ["all", `Tutte ${all.length}`]].map(([k, t]) =>
+      <div class="seg grp lic-f rise">${[["todo", `Da fare ${todo}`], ["done", `Fatte ${fatte}`], ["all", `Tutte ${all.length}`]].map(([k, t]) =>
         `<button data-act="lic" data-f="${k}" class="${f === k ? "on" : ""}">${t}</button>`).join("")}</div>
       ${l.length ? `<button class="ghost na-btn rise" data-act="stampa">${icon("printer")}<span>Stampa nullaosta (${l.length})</span></button>` : ""}
-      ${l.length ? `<div class="lic-h"><span></span><span>Nominativo</span><span>Tipo</span><span>Luogo</span><span>Dal</span><span>Al</span><span>Giorni</span><span>Note</span><span>Iter</span></div>
+      ${l.length ? `<div class="lic-h"><span></span><span>Nominativo</span><span>Tipo</span><span>Luogo</span><span>Dal</span><span>Al</span><span>Giorni</span><span>Cte di Gruppo</span><span>Note</span><span>Iter</span></div>
         <div class="list">${l.map(row).join("")}</div>` : `<p class="empty rise" style="--d:1">${f === "done" ? "Nessuna licenza registrata" : "Nessuna licenza da registrare"}</p>`}`;
   }
 
-  // nullaosta cartaceo (2 copie per A4, si taglia a metà): precompilato, ogni campo e intestazione modificabile prima di stampare
+  // nullaosta cartaceo (2 copie per A4, si taglia a metà): campi .f precompilati e modificabili sulla singola copia;
+  // i testi fissi (data-k) sono il modello in db/modello.json: modificarne uno cambia tutti i nullaosta, anche i futuri
   const ED = 'contenteditable spellcheck="false"';
+  const ENTE = "CENTRO ADDESTRATIVO AVIAZIONE dell'ESERCITO\n1° GRUPPO SQUADRONI ADDESTRATIVO “AURIGA”\n";
+  const DEF = {
+    "visto.officina": "Visto, si autorizza\nIL CAPO OFFICINA", "visto.tecnica": "Visto, si autorizza\nIL CAPO SEZIONE TECNICA",
+    "ente.officina": ENTE + "Squadrone Mantenimento Velivoli", "ente.tecnica": ENTE + "Sezione Mantenimento Velivoli",
+    ogg: "OGGETTO:", ogg2: "nullaosta licenza.", t0: "Il sottoscritto", t1: "chiede che gli venga concessa una licenza di tipo", t2: "con decorrenza dal",
+    t3: "al", t4: "(giorni totali", t5: ", computabili", t6: "). Destinazione", t7: "Prov.", t8: "dichiara che nel periodo richiesto non è inserito in nessun servizio.",
+    firma: "Firma", cte: "IL COMANDANTE SQD MANTENIMENTO VELIVOLI\nCap ing. (AVES) RN Gianmarco ARDIA", cdt: "IL COMANDANTE\nTen. Col. c.(AVES) P.O. Andrea SEMINARA"
+  };
+  const mod = (k) => Store.tables.modello[k] ?? DEF[k];
+  const T = (k, tag = "span", c = "") => `<${tag}${c && ` class="${c}"`} data-k="${k}" ${ED}>${esc(mod(k)).replace(/\n/g, "<br>")}</${tag}>`;
   function nullaosta(a) {
-    const p = byId(a.personId) || {}, tec = p.gruppo === "tecnica";
+    const p = byId(a.personId) || {}, g = p.gruppo === "tecnica" ? "tecnica" : "officina";
     const tipo = (LIC[a.sub] || "").replace(/^Licenza (di )?/, "").replace(/^./, (c) => c.toLowerCase());
-    const f = (v, mm) => `<span class="f" ${ED} style="min-width:${mm}mm">${esc(v || "")}</span>`;
+    const f = (v, mm) => `<span class="f" ${ED} style="min-width:${mm}mm">${esc(v ?? "")}</span>`;
     return `<div class="na">
-      <div class="na-head">
-        <div class="na-visto" ${ED}>Visto, si autorizza<br>IL CAPO ${tec ? "SEZIONE TECNICA" : "OFFICINA"}</div>
-        <div ${ED}>CENTRO ADDESTRATIVO AVIAZIONE dell'ESERCITO<br>1° GRUPPO SQUADRONI ADDESTRATIVO “AURIGA”<br>${tec ? "Sezione" : "Squadrone"} Mantenimento Velivoli</div>
-      </div>
-      <p>OGGETTO: <b>nullaosta licenza.</b></p>
-      <p class="na-txt">Il sottoscritto ${f(p.nome && `${p.nome} ${p.cognome.toUpperCase()}`, 60)} chiede che gli venga concessa una licenza di tipo ${f(tipo, 40)}
-        con decorrenza dal ${f(dn(a.dal), 28)} al ${f(dn(a.al), 28)} (giorni totali ${f(giorni(a), 12)}, computabili ${f("", 12)}).
-        Destinazione ${f(a.luogo, 50)} Prov. ${f("", 12)} dichiara che nel periodo richiesto non è inserito in nessun servizio.</p>
-      <div class="na-firma">Firma</div>
-      <div class="na-cte" ${ED}>IL COMANDANTE SQD MANTENIMENTO VELIVOLI<br>Cap ing. (AVES) RN Gianmarco ARDIA</div>
-      <div class="na-cdt" ${ED}>IL COMANDANTE<br>Ten. Col. c.(AVES) P.O. Andrea SEMINARA</div>
+      <div class="na-head">${T("visto." + g, "div", "na-visto")}${T("ente." + g, "div")}</div>
+      <p>${T("ogg")} ${T("ogg2", "b")}</p>
+      <p class="na-txt">${T("t0")} ${f(p.nome && `${p.nome} ${p.cognome.toUpperCase()}`, 60)} ${T("t1")} ${f(tipo, 40)}
+        ${T("t2")} ${f(dn(a.dal), 28)} ${T("t3")} ${f(dn(a.al), 28)} ${T("t4")} ${f(giorni(a), 12)}${T("t5")} ${f(computabili(a), 12)}${T("t6")}
+        ${f(a.luogo, 50)} ${T("t7")} ${f(a.prov, 12)} ${T("t8")}</p>
+      ${T("firma", "div", "na-firma")}${T("cte", "div", "na-cte")}${T("cdt", "div", "na-cdt")}
     </div>`;
   }
 
@@ -471,11 +495,12 @@
               <input type="checkbox" name="p" value="${x.id}"><span class="av">${initials(x)}</span><span>${esc(fullName(x))}</span>${icon("check")}</label>`).join("")}</div>
           </div>
         </div>` : `<input type="hidden" name="p" value="${p.id}">`}
-        <div class="tipi">${Object.entries(TIPI).map(([k, t]) =>
+        <div class="tipi">${Object.entries(TIPI).filter(([k]) => k !== "rco").map(([k, t]) =>
           `<label class="tipo" style="--c:${t.c}"><input type="radio" name="tipo" value="${k}">${icon(t.i)}<span>${t.l}</span></label>`).join("")}</div>
         <div class="lic">
           <select name="sub" aria-label="Tipo di licenza" required><option value="">Tipo di licenza</option>${Object.entries(LIC).map(([k, l]) => `<option value="${k}">${l}</option>`).join("")}</select>
-          <input name="luogo" placeholder="Luogo di fruizione" autocapitalize="words" enterkeyhint="next">
+          <div class="loc"><input name="luogo" placeholder="Luogo di fruizione" autocapitalize="words" enterkeyhint="next">
+            <input name="prov" placeholder="Prov." aria-label="Provincia" maxlength="2" autocapitalize="characters" enterkeyhint="next"></div>
         </div>
         <div class="dates">
           <label><small>Dal</small><input type="date" name="dal" value="${d}"></label>
@@ -564,7 +589,7 @@
     const ids = [...f.querySelectorAll("[name=p]")].filter((c) => c.type === "hidden" || c.checked).map((c) => c.value);
     const t = f.elements.tipo.value, note = f.elements.note.value.trim(), dal = f.elements.dal.value;
     const orario = t === "orario", dalle = f.elements.dalle.value, alle = f.elements.alle.value;
-    const lic = t === "licenza", sub = f.elements.sub.value, luogo = f.elements.luogo.value.trim();
+    const lic = t === "licenza", sub = f.elements.sub.value, luogo = f.elements.luogo.value.trim(), prov = f.elements.prov.value.trim().toUpperCase();
     const al = orario || f.elements.al.value < dal ? dal : f.elements.al.value;
     if (!ids.length) { f.querySelector(".chi")?.classList.add("open"); throw new Error("Scegli chi"); }
     if (!t) throw new Error("Scegli il tipo");
@@ -576,12 +601,17 @@
     if (!isAdmin(S.me) && ids.some((id) => id !== S.me.id)) throw new Error("Non autorizzato");
     const r = { tipo: t, dal, al, note, by: S.me.id, at: new Date().toISOString() };
     if (orario) Object.assign(r, { dalle, alle });
-    if (lic) Object.assign(r, { sub, ...(luogo && { luogo }) });
+    if (lic) Object.assign(r, { sub, ...(luogo && { luogo }), ...(prov && { prov }) });
     if (isCmd(S.me)) r.cmd = "si"; // il comandante non attende approvazione
     else if (!isAdmin(S.me) && grp(S.me)) r.gruppo = grp(S.me); // utente: lo vede anche il capo del suo gruppo
     await Store.mutate("absences", (l) => {
-      ids.forEach((pid) => l.push({ id: uid(), personId: pid, ...r }));
-    }, `${lic ? LIC[sub] : TIPI[t].l} ${dal}${al !== dal ? "→" + al : ""}${orario ? ` ${dalle}-${alle}` : ""} ×${ids.length}`);
+      ids.forEach((pid) => {
+        const id = uid(), g = addDays(al, 1);
+        l.push({ id, personId: pid, ...r });
+        // guardia → RCO il giorno dopo: senza gruppo né licenza, quindi niente capo, Cte e nullaosta; decide (e riceve la notifica) solo il comandante
+        if (t === "guardia") l.push({ id: uid(), personId: pid, tipo: "rco", dal: g, al: g, note: "", by: r.by, at: r.at, rif: id, ...(r.cmd && { cmd: "si" }) });
+      });
+    },`${lic ? LIC[sub] : TIPI[t].l} ${dal}${al !== dal ? "→" + al : ""}${orario ? ` ${dalle}-${alle}` : ""} ×${ids.length}`);
     const back = S.back;
     render();
     back ? back() : closeSheet();
@@ -620,7 +650,8 @@
     add: (t) => addSheet(t.dataset.who),
     person: (t) => personSheet(t.dataset.id),
     del: (t) => run(t, async () => {
-      await Store.mutate("absences", (l) => { const i = l.findIndex((a) => a.id === t.dataset.id); if (i >= 0) l.splice(i, 1); }, "elimina impegno");
+      // con la guardia se ne va anche il suo RCO (rif)
+      await Store.mutate("absences", (l) => { for (let i = l.length; i--; ) if (l[i].id === t.dataset.id || l[i].rif === t.dataset.id) l.splice(i, 1); }, "elimina impegno");
       afterChange();
     }),
     ok: (t) => run(t, async () => {
@@ -732,6 +763,16 @@
     al.min = dal.value;
     if (al.value < dal.value) al.value = dal.value;
   }
+
+  // modello nullaosta: mentre si scrive si aggiornano tutte le copie aperte; uscendo dal testo si salva per tutti i nullaosta futuri
+  document.addEventListener("input", (e) => {
+    const t = e.target, k = t.dataset.k;
+    if (k) document.querySelectorAll(`#na [data-k="${k}"]`).forEach((x) => x !== t && (x.innerHTML = t.innerHTML));
+  });
+  document.addEventListener("focusout", (e) => {
+    const k = e.target.dataset?.k, v = k && e.target.innerText.trim();
+    if (k && v !== mod(k)) run(null, async () => { await Store.mutate("modello", (m) => { m[k] = v; }, "modello nullaosta"); toast("Modello salvato"); });
+  });
 
   document.addEventListener("input", (e) => {
     if (e.target.dataset.input !== "q") return;

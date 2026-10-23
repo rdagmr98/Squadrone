@@ -7,8 +7,8 @@
     "https://api.github.com/repos/" + (C.owner || "rdagmr98") + "/" +
     (C.repo || "squadrone-data") + "/contents/db/";
   var BRANCH = C.branch || "main";
-  var TABLES = ["personnel", "absences"];
-  var tables = { personnel: [], absences: [] };
+  var TABLES = ["personnel", "absences", "modello"];
+  var tables = { personnel: [], absences: [], modello: {} }; // modello = testi fissi del nullaosta (oggetto, non lista)
 
   function gh(name, opts) {
     opts = opts || {};
@@ -41,12 +41,12 @@
   }
 
   async function read(name) {
-    var res = await gh(name);
-    if (res.status === 404) return { sha: null, data: [] };
+    var res = await gh(name), empty = Array.isArray(tables[name]) ? [] : {};
+    if (res.status === 404) return { sha: null, data: empty };
     if (!res.ok) throw await fail(res);
     var j = await res.json();
     var txt = dec(j.content).trim();
-    return { sha: j.sha, data: txt ? JSON.parse(txt) : [] };
+    return { sha: j.sha, data: txt ? JSON.parse(txt) : empty };
   }
 
   async function loadAll() {
