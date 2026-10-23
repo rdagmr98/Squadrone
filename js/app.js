@@ -378,7 +378,7 @@
     "ente.officina": ENTE + "Squadrone Mantenimento Velivoli", "ente.tecnica": ENTE + "Sezione Mantenimento Velivoli",
     ogg: "OGGETTO:", ogg2: "nullaosta licenza.", t0: "Il sottoscritto", t1: "chiede che gli venga concessa una licenza di tipo", t2: "con decorrenza dal",
     t3: "al", t4: "(giorni totali", t5: ", computabili", t6: "). Destinazione", t7: "Prov.", t8: "dichiara che nel periodo richiesto non è inserito in nessun servizio.",
-    firma: "Firma", cte: "IL COMANDANTE SQD MANTENIMENTO VELIVOLI\nCap ing. (AVES) RN Gianmarco ARDIA", cdt: "IL COMANDANTE\nTen. Col. c.(AVES) P.O. Andrea SEMINARA"
+    cte: "IL COMANDANTE SQD MANTENIMENTO VELIVOLI\nCap ing. (AVES) RN Gianmarco ARDIA", cdt: "IL COMANDANTE\nTen. Col. c.(AVES) P.O. Andrea SEMINARA"
   };
   const mod = (k) => Store.tables.modello[k] ?? DEF[k];
   const T = (k, tag = "span", c = "") => `<${tag}${c && ` class="${c}"`} data-k="${k}" ${ED}>${esc(mod(k)).replace(/\n/g, "<br>")}</${tag}>`;
@@ -392,7 +392,7 @@
       <p class="na-txt">${T("t0")} ${f(p.nome && `${p.nome} ${p.cognome.toUpperCase()}`, 60)} ${T("t1")} ${f(tipo, 40)}
         ${T("t2")} ${f(dn(a.dal), 28)} ${T("t3")} ${f(dn(a.al), 28)} ${T("t4")} ${f(giorni(a), 12)}${T("t5")} ${f(computabili(a), 12)}${T("t6")}
         ${f(a.luogo, 50)} ${T("t7")} ${f(a.prov, 12)} ${T("t8")}</p>
-      ${T("firma", "div", "na-firma")}${T("cte", "div", "na-cte")}${T("cdt", "div", "na-cdt")}
+      ${T("cte", "div", "na-cte")}${T("cdt", "div", "na-cdt")}
     </div>`;
   }
 
@@ -499,7 +499,7 @@
           `<label class="tipo" style="--c:${t.c}"><input type="radio" name="tipo" value="${k}">${icon(t.i)}<span>${t.l}</span></label>`).join("")}</div>
         <div class="lic">
           <select name="sub" aria-label="Tipo di licenza" required><option value="">Tipo di licenza</option>${Object.entries(LIC).map(([k, l]) => `<option value="${k}">${l}</option>`).join("")}</select>
-          <div class="loc"><input name="luogo" placeholder="Luogo di fruizione" autocapitalize="words" enterkeyhint="next">
+          <div class="loc"><input name="luogo" placeholder="Destinazione" autocapitalize="words" enterkeyhint="next">
             <input name="prov" placeholder="Prov." aria-label="Provincia" maxlength="2" autocapitalize="characters" enterkeyhint="next"></div>
         </div>
         <div class="dates">
@@ -594,6 +594,7 @@
     if (!ids.length) { f.querySelector(".chi")?.classList.add("open"); throw new Error("Scegli chi"); }
     if (!t) throw new Error("Scegli il tipo");
     if (lic && !sub) throw new Error("Scegli il tipo di licenza");
+    if (lic && !(luogo && /^[A-Z]{2}$/.test(prov))) throw new Error("Scrivi destinazione e provincia (sigla, es. VT)");
     if (!dal) throw new Error("Scegli la data");
     if (lic && MEDICA.includes(sub) && dal > addDays(today(), 1)) throw new Error("Riposo medico e convalescenza: al massimo dal giorno dopo");
     if (orario && !(dalle && alle && dalle < alle)) throw new Error("Scegli le ore: dalle … alle");
