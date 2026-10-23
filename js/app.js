@@ -319,11 +319,14 @@
   }
 
   // Aiutante Maggiore (desktop 16:9): licenze approvate dal Cte, da registrare; "fatta" = già lavorata
+  const dn = (s) => fmt(s, { day: "2-digit", month: "2-digit", year: "numeric" });
+  const licList = () => {
+    const all = Store.tables.absences.filter(licOk).sort((a, b) => a.dal.localeCompare(b.dal) || a.at.localeCompare(b.at)), f = S.lic;
+    return { all, l: all.filter((a) => (f === "todo" ? !a.fatta : f === "done" ? a.fatta : true)) };
+  };
+
   function licenzeView() {
-    const all = Store.tables.absences.filter(licOk).sort((a, b) => a.dal.localeCompare(b.dal) || a.at.localeCompare(b.at));
-    const todo = all.filter((a) => !a.fatta).length, f = S.lic;
-    const l = all.filter((a) => (f === "todo" ? !a.fatta : f === "done" ? a.fatta : true));
-    const dn = (s) => fmt(s, { day: "2-digit", month: "2-digit", year: "numeric" });
+    const { all, l } = licList(), todo = all.filter((a) => !a.fatta).length, f = S.lic;
     const row = (a, i) => {
       const p = byId(a.personId), by = a.by !== a.personId && byId(a.by);
       const iter = [by && `Inserita da ${fullName(by)} ${dt(a.at)}`, a.cmdAt && `Comandante ${dt(a.cmdAt)}`, a.cteAt && `Cte di Gruppo ${dt(a.cteAt)}`, a.fatta && `Registrata ${dt(a.fattaAt)}`];
@@ -343,9 +346,43 @@
     return `<h2 class="sec rise">Licenze<b>${todo}</b></h2>
       <div class="seg grp lic-f rise">${[["todo", `Da fare ${todo}`], ["done", `Fatte ${all.length - todo}`], ["all", `Tutte ${all.length}`]].map(([k, t]) =>
         `<button data-act="lic" data-f="${k}" class="${f === k ? "on" : ""}">${t}</button>`).join("")}</div>
+      ${l.length ? `<button class="ghost na-btn rise" data-act="stampa">${icon("printer")}<span>Stampa nullaosta (${l.length})</span></button>` : ""}
       ${l.length ? `<div class="lic-h"><span></span><span>Nominativo</span><span>Tipo</span><span>Luogo</span><span>Dal</span><span>Al</span><span>Giorni</span><span>Note</span><span>Iter</span></div>
         <div class="list">${l.map(row).join("")}</div>` : `<p class="empty rise" style="--d:1">${f === "done" ? "Nessuna licenza registrata" : "Nessuna licenza da registrare"}</p>`}`;
   }
+
+  // nullaosta cartaceo (2 copie per A4, si taglia a metà): precompilato, ogni campo e intestazione modificabile prima di stampare
+  const ED = 'contenteditable spellcheck="false"';
+  function nullaosta(a) {
+    const p = byId(a.personId) || {}, tec = p.gruppo === "tecnica";
+    const tipo = (LIC[a.sub] || "").replace(/^Licenza (di )?/, "").replace(/^./, (c) => c.toLowerCase());
+    const f = (v, mm) => `<span class="f" ${ED} style="min-width:${mm}mm">${esc(v || "")}</span>`;
+    return `<div class="na">
+      <div class="na-head">
+        <div class="na-visto" ${ED}>Visto, si autorizza<br>IL CAPO ${tec ? "SEZIONE TECNICA" : "OFFICINA"}</div>
+        <div ${ED}>CENTRO ADDESTRATIVO AVIAZIONE dell'ESERCITO<br>1° GRUPPO SQUADRONI ADDESTRATIVO “AURIGA”<br>${tec ? "Sezione" : "Squadrone"} Mantenimento Velivoli</div>
+      </div>
+      <p>OGGETTO: <b>nullaosta licenza.</b></p>
+      <p class="na-txt">Il sottoscritto ${f(p.nome && `${p.nome} ${p.cognome.toUpperCase()}`, 60)} chiede che gli venga concessa una licenza di tipo ${f(tipo, 40)}
+        con decorrenza dal ${f(dn(a.dal), 28)} al ${f(dn(a.al), 28)} (giorni totali ${f(giorni(a), 12)}, computabili ${f("", 12)}).
+        Destinazione ${f(a.luogo, 50)} Prov. ${f("", 12)} dichiara che nel periodo richiesto non è inserito in nessun servizio.</p>
+      <div class="na-firma">Firma</div>
+      <div class="na-cte" ${ED}>IL COMANDANTE SQD MANTENIMENTO VELIVOLI<br>Cap ing. (AVES) RN Gianmarco ARDIA</div>
+      <div class="na-cdt" ${ED}>IL COMANDANTE<br>Ten. Col. c.(AVES) P.O. Andrea SEMINARA</div>
+    </div>`;
+  }
+
+  // fuori da #app: refresh/render non lo toccano
+  function naOpen() {
+    const { l } = licList();
+    document.body.insertAdjacentHTML("beforeend", `<div id="na">
+      <div class="na-bar"><button class="cta" data-act="naPrint"><span>Stampa ${l.length} nullaosta</span><b>${icon("printer")}</b></button>
+        <span>Tocca un campo per modificarlo · 2 copie per foglio</span>
+        <button class="ghost" data-act="naClose">${icon("x")}<span>Chiudi</span></button></div>
+      ${l.map((a) => `<div class="na-page">${nullaosta(a)}<div class="na"></div></div>`).join("")}</div>`);
+  }
+  // la copia inferiore del foglio = quella superiore con le modifiche fatte a schermo (anche con Ctrl+P)
+  addEventListener("beforeprint", () => document.querySelectorAll(".na-page").forEach((p) => (p.lastElementChild.innerHTML = p.firstElementChild.innerHTML)));
 
   function render(anim) {
     S.me = S.me && byId(S.me.id);
@@ -382,8 +419,17 @@
         <div><b>${esc(me.nome)} ${esc(me.cognome)}</b><small>${esc(ruolo(me) || "Sq. Mantenimento · H7")}</small></div></div>
       ${isStaff(me) ? "" : `<div class="eyebrow grp-l">Gruppo</div>${gruppoSeg(me.gruppo, 'data-change="gruppo"')}`}
       ${pushHint() ? `<p class="push-hint">${icon("bell-slash")}<span>${pushHint()}</span></p>` : ""}
+      <form class="form pw-f" id="pwForm" novalidate>
+        <div class="eyebrow grp-l">Cambia password</div>
+        ${me.hash ? pwField("old", "Password attuale", "current-password") : ""}
+        ${pwField("pw", "Nuova password", "new-password")}
+        <button class="ghost wide" type="submit">${icon("key")}<span>Cambia password</span></button>
+      </form>
       <button class="ghost wide" data-act="logout">${icon("sign-out")}<span>Esci</span></button>`);
   }
+
+  const pwField = (n, ph, ac) => `<div class="pw"><input name="${n}" type="password" placeholder="${ph}" autocomplete="${ac}">
+    <button type="button" data-act="eye" aria-label="Mostra password">${icon("eye")}</button></div>`;
 
   function personSheet(id) {
     const p = byId(id);
@@ -504,6 +550,16 @@
     login(byId(p.id));
   }
 
+  async function doPw(f) {
+    const me = S.me, old = f.elements.old?.value, pw = f.elements.pw.value;
+    if (!pw || (me.hash && !old)) throw new Error("Compila tutti i campi");
+    if (me.hash && (await hash(old, me.salt)) !== me.hash) throw new Error("Password attuale errata");
+    const salt = uid(), h = await hash(pw, salt);
+    await editPerson(me.id, (x) => { x.salt = salt; x.hash = h; }, `password ${me.cognome} ${me.nome}`);
+    closeSheet();
+    toast("Password cambiata");
+  }
+
   async function doAdd(f) {
     const ids = [...f.querySelectorAll("[name=p]")].filter((c) => c.type === "hidden" || c.checked).map((c) => c.value);
     const t = f.elements.tipo.value, note = f.elements.note.value.trim(), dal = f.elements.dal.value;
@@ -589,6 +645,9 @@
       toast(n + (n === 1 ? " approvata" : " approvate"));
     }),
     lic(t) { S.lic = t.dataset.f; render(); },
+    stampa: () => { $("#na")?.remove(); naOpen(); },
+    naPrint: () => print(),
+    naClose: () => $("#na")?.remove(),
     fatta: (t) => run(t, async () => {
       const done = await Store.mutate("absences", (l) => {
         const a = l.find((x) => x.id === t.dataset.id);
@@ -648,7 +707,7 @@
 
   document.addEventListener("submit", (e) => {
     e.preventDefault();
-    const f = e.target, fn = { authForm: doAuth, addForm: doAdd }[f.id];
+    const f = e.target, fn = { authForm: doAuth, addForm: doAdd, pwForm: doPw }[f.id];
     if (fn) run(f.querySelector("[type=submit]"), () => fn(f));
   });
 

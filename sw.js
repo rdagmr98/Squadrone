@@ -16,7 +16,7 @@ self.addEventListener("fetch", e => {
 // Web Push (inviato da push/notify.mjs nell'Action di squadrone-data): arriva anche ad app chiusa
 self.addEventListener("push", e => {
   const d = e.data ? e.data.json() : {};
-  e.waitUntil(self.registration.showNotification(d.title || "Squadrone H7", { body: d.body || "", icon: "icons/icon-192.png" }));
+  e.waitUntil(self.registration.showNotification(d.title || "Squadrone H7", { body: d.body || "", icon: "icons/icon-192.png", badge: "icons/badge-h7.png" }));
 });
 self.addEventListener("notificationclick", e => {
   e.notification.close();
