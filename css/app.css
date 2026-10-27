@@ -371,7 +371,7 @@ option { background: #0b0d12; color: var(--ink); }
 /* licenze (Aiutante Maggiore): card su mobile, tabella 16:9 su desktop */
 .lic-h { display: none; }
 .lic-r {
-  display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 10px 20px; padding: 14px 14px 14px 64px; position: relative;
+  display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 10px 20px; padding: 14px 14px 14px 54px; position: relative;
   border-radius: 20px; background: rgba(255, 255, 255, .03); border: 1px solid rgba(255, 255, 255, .055);
 }
 .lic-r > span { min-width: 0; overflow-wrap: anywhere; display: grid; gap: 2px; align-content: start; }
@@ -380,19 +380,21 @@ option { background: #0b0d12; color: var(--ink); }
 .lic-r > span::before { content: attr(data-l); font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--mute); }
 .lic-r > span:is([data-l=Nominativo], [data-l=Tipo], [data-l=Luogo], [data-l=Note], [data-l=Iter]) { grid-column: 1 / -1; }
 .lic-r > span:is([data-l=Nominativo], [data-l=Iter])::before { display: none; }
+.lic-r > span[data-l=Nominativo] { padding-right: 84px; } /* spazio per la pillola Da fare/Fatta */
 .lic-r > span[data-l=Nominativo] b { font-size: 16px; }
 .lic-r > span[data-l=Iter] { padding-top: 10px; border-top: 1px solid var(--line); }
 .lic-r small { color: var(--mute); font-size: 12px; }
+/* stato registrazione: pillola che si alterna Da fare / Fatta (la casella quadrata resta solo per la stampa) */
 .chk {
-  position: absolute; left: 8px; top: 8px; display: grid; place-items: center; width: 48px; height: 48px;
-  border-radius: 16px; font-size: 26px; color: var(--mute); transition: transform .4s var(--ease), color .3s var(--ease);
+  position: absolute; right: 12px; top: 12px; padding: 6px 12px; border-radius: 99px; font-size: 13px; font-weight: 500; white-space: nowrap;
+  color: #fbbf24; background: rgba(251, 191, 36, .12); transition: transform .4s var(--ease), color .3s var(--ease), background .3s var(--ease);
 }
 .chk:active { transform: scale(.92); }
-.chk[aria-pressed=true] { color: var(--ok); }
+.chk[aria-pressed=true] { color: var(--ok); background: rgba(52, 211, 153, .12); }
 .lic-f { margin-bottom: 16px; }
 /* scelta dei nullaosta da stampare */
 .sel, .lic-sel input { width: 22px; height: 22px; margin: 0; accent-color: var(--blue); cursor: pointer; }
-.lic-r > .sel { position: absolute; right: 16px; top: 16px; }
+.lic-r > .sel { position: absolute; left: 18px; top: 16px; }
 .lic-tools { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-bottom: 12px; }
 .lic-tools .search { grid-column: 1 / -1; }
 .lic-sel { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; margin-bottom: 16px; padding: 0 4px; }
@@ -405,7 +407,7 @@ option { background: #0b0d12; color: var(--ink); }
   .lic-tools .search { grid-column: auto; }
   .lic-r > .sel { position: static; justify-self: center; }
   .lic-h, .lic-r {
-    display: grid; grid-template-columns: 28px 48px minmax(150px, 1.3fr) 1fr 1.1fr 100px 100px 60px 110px 1.4fr 1.6fr;
+    display: grid; grid-template-columns: 28px 76px minmax(150px, 1.3fr) 1fr 1.1fr 100px 100px 60px 110px 1.4fr 1.6fr;
     align-items: center; gap: 14px;
   }
   .lic-h {
@@ -419,8 +421,9 @@ option { background: #0b0d12; color: var(--ink); }
   .lic-r > span:empty { display: grid; }
   .lic-r > span:empty::after { content: "—"; color: var(--mute); }
   .lic-r > span[data-l=Iter] { padding-top: 0; border-top: 0; }
+  .lic-r > span[data-l=Nominativo] { padding-right: 0; }
   .lic-r > span[data-l=Nominativo] b { font-size: inherit; }
-  .chk { position: static; }
+  .chk { position: static; justify-self: start; }
 }
 
 /* toast */
@@ -454,19 +457,19 @@ body:has(#na) { overflow: hidden; }
 .na p { margin: 0; }
 .na-head { position: relative; margin-bottom: 2.5mm; text-align: center; font-size: 9pt; line-height: 1.25; }
 .na-visto { position: absolute; left: 0; top: 0; font-size: 7pt; line-height: 1.4; text-align: left; }
-@media screen and (max-width: 600px) { .na-visto { position: relative; margin-bottom: 7mm; } }
+@media screen and (max-width: 600px) { .na-visto { position: relative; margin-bottom: 3mm; } }
 .na .na-txt { margin-top: 1.5mm; line-height: 1.65; }
 .na .f { display: inline-block; min-height: 1.3em; padding: 0 1.5mm; border-bottom: 1px solid; line-height: 1.3; text-align: center; outline: none; }
-/* firme affiancate; sotto ogni nome 9mm per la firma (sigla stampata o a mano) */
+/* firme affiancate; sotto ogni nome 9mm per la firma a mano */
 .na-firme { display: flex; justify-content: space-between; gap: 6mm; margin-top: 3mm; line-height: 1.25; }
 .na-cte, .na-cdt { position: relative; padding-bottom: 9mm; text-align: center; white-space: nowrap; }
 .na-cte { margin-left: 18%; }
-/* sigla: inchiostro di biro blu, leggermente storta, col ricciolo sotto */
-.sig { position: absolute; display: inline-block; color: #1c3f94; font-size: 22pt; line-height: 1; white-space: nowrap; pointer-events: none; transform: rotate(var(--r)); }
+/* sigla: inchiostro di biro blu sopra il gruppo firma (multiply: il testo stampato resta leggibile sotto) */
+.sig { position: absolute; display: inline-block; color: #1c3f94; mix-blend-mode: multiply; font-size: 22pt; line-height: 1; white-space: nowrap; pointer-events: none; transform: rotate(var(--r)); }
 .sig svg { position: absolute; left: -15%; bottom: -.12em; width: 140%; height: .45em; overflow: visible; }
 .sig path { fill: none; stroke: currentColor; stroke-width: 1.1px; stroke-linecap: round; vector-effect: non-scaling-stroke; }
-.na-visto .sig { left: 12mm; top: calc(100% + .5mm); font-size: 17pt; }
-.na-cte .sig { left: 50%; bottom: -1mm; translate: -50% 0; }
+.na-visto .sig { left: 12mm; top: -.5mm; font-size: 18pt; }
+.na-cte .sig { left: 50%; top: -1.5mm; translate: -50% 0; }
 @media screen {
   .na [contenteditable]:hover { background: #f1f5f9; }
   .na [contenteditable]:focus { background: #fef3c7; outline: none; }

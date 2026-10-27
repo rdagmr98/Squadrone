@@ -367,7 +367,7 @@
       // ponytail: celle vuote senza "—": su mobile spariscono (:empty), su desktop il trattino lo mette il CSS
       return `<div class="lic-r rise" style="--d:${Math.min(i, 8) + 2}">
         <input type="checkbox" class="sel" data-change="sel" value="${a.id}" ${S.sel.has(a.id) ? "checked" : ""} aria-label="Stampa nullaosta">
-        <button class="chk" data-act="fatta" data-id="${a.id}" aria-label="${a.fatta ? "Da fare" : "Registrata"}" aria-pressed="${!!a.fatta}">${icon(a.fatta ? "check-square" : "square")}</button>
+        <button class="chk" data-act="fatta" data-id="${a.id}" title="${a.fatta ? "Rimetti da fare" : "Segna come fatta"}" aria-pressed="${!!a.fatta}">${a.fatta ? "Fatta" : "Da fare"}</button>
         <span data-l="Nominativo"><b>${esc(fullName(p))}</b><small>${esc(ruolo(p))}</small></span>
         <span data-l="Tipo">${esc(LIC[a.sub] || "")}</span>
         <span data-l="Luogo">${esc(a.luogo || "")}</span>
@@ -391,7 +391,7 @@
       ${l.length ? `<div class="lic-sel rise">
         <label><input type="checkbox" data-change="selAll" ${sel.length === l.length ? "checked" : ""}><span>Seleziona tutte (${l.length})</span></label>
         <button class="ghost" data-act="stampa" ${sel.length ? "" : "disabled"}>${icon("printer")}<span>Stampa nullaosta (${sel.length})</span></button></div>
-        <div class="lic-h"><span></span><span></span><span>Nominativo</span><span>Tipo</span><span>Luogo</span><span>Dal</span><span>Al</span><span>Giorni</span><span>Cte di Gruppo</span><span>Note</span><span>Iter</span></div>
+        <div class="lic-h"><span></span><span>Stato</span><span>Nominativo</span><span>Tipo</span><span>Luogo</span><span>Dal</span><span>Al</span><span>Giorni</span><span>Cte di Gruppo</span><span>Note</span><span>Iter</span></div>
         <div class="list">${l.map(row).join("")}</div>` : `<p class="empty rise" style="--d:1">${S.lq || S.lg || S.lt ? "Nessun risultato" : f === "done" ? "Nessuna licenza registrata" : "Nessuna licenza da registrare"}</p>`}`;
   }
 
