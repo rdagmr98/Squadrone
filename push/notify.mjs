@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url";
 
 // ponytail: regole copiate da js/app.js (TIPI, LIC, isCmd, capoDi, stato, stText, pend, licOk): se cambiano lì, aggiornare qui
 const CMD = "mubqvhx6r8lx4o";
-const TIPI = { licenza: "Licenza", guardia: "Guardia", polveriera: "Polveriera", stormo72: "72° Stormo", orario: "Assenza oraria", altro: "Altro", rco: "RCO" };
+const TIPI = { licenza: "Licenza", guardia: "Guardia", polveriera: "Polveriera", stormo72: "Servizio isolato", orario: "Assenza oraria", altro: "Altro", rco: "RCO" };
 const LIC = { ordinaria: "Licenza ordinaria", straordinaria: "Licenza straordinaria", festivita: "Recupero festività", l937: "Riposo L. 937/77",
   compensativo: "Recupero compensativo", l104: "Permesso L. 104/92", riposo: "Riposo medico", convalescenza: "Licenza di convalescenza", altra: "Altro" };
 const GRUPPI = { officina: 1, tecnica: 1 };

@@ -11,7 +11,7 @@ Presenze/assenze dello squadrone, mobile-first. HTML/JS vanilla, nessuna build.
 
 ## Flussi
 
-1. **Personale** — registrazione/login con nome, cognome e password (qualsiasi, hash PBKDF2). Impegni: licenza, guardia, polveriera, 72° Stormo, assenza oraria (dalle/alle, stesso giorno), altro (nota). Ogni utente sceglie il gruppo: Officina o Sezione Tecnica.
+1. **Personale** — registrazione/login con nome, cognome e password (qualsiasi, hash PBKDF2). Impegni: licenza, guardia, polveriera, servizio isolato, assenza oraria (dalle/alle, stesso giorno), altro (nota). Ogni utente sceglie il gruppo: Officina o Sezione Tecnica.
 2. **Comandante** — unico, identificato da `cmd` in config (niente PIN). Promuove admin (senza gruppo) e sceglie tra loro Capo Officina e Capo Sezione Tecnica. Assegna impegni a tutti / ad alcuni / a uno; reset password, elimina.
 3. **Approvazioni** — impegno di un utente → campanella del capo del suo gruppo e del comandante (che vede il parere del capo e decide). Impegni inseriti da admin/capi → solo comandante. Rifiutati = non contano come assenza.
 4. **Oggi** — presenti/assenti/assenze orarie per giorno, filtro Tutti / Officina / Sez. Tecnica.

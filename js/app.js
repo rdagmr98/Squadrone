@@ -6,7 +6,7 @@
     licenza: { l: "Licenza", i: "suitcase-rolling", c: "#22d3ee" },
     guardia: { l: "Guardia", i: "shield-star", c: "#fbbf24" },
     polveriera: { l: "Polveriera", i: "warehouse", c: "#fb7185" },
-    stormo72: { l: "72° Stormo", i: "airplane-in-flight", c: "#60a5fa" },
+    stormo72: { l: "Servizio isolato", i: "map-pin-line", c: "#60a5fa" }, // chiave storica: i record salvati restano validi
     orario: { l: "Assenza oraria", i: "clock-countdown", c: "#fb923c" },
     altro: { l: "Altro", i: "note-pencil", c: "#a78bfa" },
     // recupero compensativo obbligatorio: creato in automatico col giorno dopo la guardia, non si sceglie a mano
@@ -22,7 +22,8 @@
     compensativo: "Recupero compensativo", l104: "Permesso L. 104/92", riposo: "Riposo medico", convalescenza: "Licenza di convalescenza", altra: "Altro" };
   const MEDICA = ["riposo", "convalescenza"];
   const KEY = "sq_uid";
-  const S = { me: null, view: "me", day: null, grp: "", lic: "todo", reopen: null, back: null, last: 0 };
+  // lq/lg/lt/ls = cerca, gruppo, tipo e ordine delle Licenze · sel = id scelti per la stampa dei nullaosta
+  const S = { me: null, view: "me", day: null, grp: "", lic: "todo", lq: "", lg: "", lt: "", ls: "dal", sel: new Set(), reopen: null, back: null, last: 0 };
 
   const $ = (s, r = document) => r.querySelector(s);
   const app = $("#app"), nav = $("#nav"), dlg = $("#sheet"), toastEl = $("#toast");
@@ -338,18 +339,34 @@
   // rifiutate dal Cte di Gruppo: non da fare, restano solo in "Tutte"
   const dn = (s) => fmt(s, { day: "2-digit", month: "2-digit", year: "numeric" });
   const CTE = { si: "Approvata", no: "Rifiutata", attesa: "In attesa" };
-  const licList = () => {
-    const all = Store.tables.absences.filter(licOk).sort((a, b) => a.dal.localeCompare(b.dal) || a.at.localeCompare(b.at)), f = S.lic;
-    return { all, l: all.filter((a) => (f === "todo" ? daFare(a) : f === "done" ? a.fatta : true)) };
+  const nome = (a) => fullName(byId(a.personId));
+  const SORT = {
+    dal: ["Data ↑", (a, b) => a.dal.localeCompare(b.dal) || a.at.localeCompare(b.at)],
+    dalD: ["Data ↓", (a, b) => b.dal.localeCompare(a.dal) || b.at.localeCompare(a.at)],
+    az: ["Nome A-Z", (a, b) => nome(a).localeCompare(nome(b), "it")],
+    za: ["Nome Z-A", (a, b) => nome(b).localeCompare(nome(a), "it")],
+    at: ["Ultime inserite", (a, b) => b.at.localeCompare(a.at)]
   };
+  const licList = () => {
+    const all = Store.tables.absences.filter(licOk), f = S.lic, q = norm(S.lq);
+    const l = all.filter((a) => {
+      const p = byId(a.personId);
+      return (f === "todo" ? daFare(a) : f === "done" ? a.fatta : true) && (!S.lg || grp(p) === S.lg) && (!S.lt || a.sub === S.lt)
+        && (!q || norm([fullName(p), p.nome, p.cognome, a.luogo, a.prov, a.note, LIC[a.sub]].join(" ")).includes(q));
+    }).sort((SORT[S.ls] || SORT.dal)[1]);
+    // si stampano solo le scelte tra quelle visibili: quello che si vede è quello che esce
+    return { all, l, sel: l.filter((a) => S.sel.has(a.id)) };
+  };
+  const opts = (o, v) => Object.entries(o).map(([k, l]) => `<option value="${k}" ${k === v ? "selected" : ""}>${esc(Array.isArray(l) ? l[0] : l)}</option>`).join("");
 
   function licenzeView() {
-    const { all, l } = licList(), todo = all.filter(daFare).length, fatte = all.filter((a) => a.fatta).length, f = S.lic;
+    const { all, l, sel } = licList(), todo = all.filter(daFare).length, fatte = all.filter((a) => a.fatta).length, f = S.lic;
     const row = (a, i) => {
       const p = byId(a.personId), by = a.by !== a.personId && byId(a.by);
       const iter = [by && `Inserita da ${fullName(by)} ${dt(a.at)}`, a.cmdAt && `Comandante ${dt(a.cmdAt)}`, a.cteAt && `Cte di Gruppo ${dt(a.cteAt)}`, a.fatta && `Registrata ${dt(a.fattaAt)}`];
       // ponytail: celle vuote senza "—": su mobile spariscono (:empty), su desktop il trattino lo mette il CSS
-      return `<div class="lic-r rise${a.fatta ? " done" : ""}" style="--d:${Math.min(i, 8) + 2}">
+      return `<div class="lic-r rise" style="--d:${Math.min(i, 8) + 2}">
+        <input type="checkbox" class="sel" data-change="sel" value="${a.id}" ${S.sel.has(a.id) ? "checked" : ""} aria-label="Stampa nullaosta">
         <button class="chk" data-act="fatta" data-id="${a.id}" aria-label="${a.fatta ? "Da fare" : "Registrata"}" aria-pressed="${!!a.fatta}">${icon(a.fatta ? "check-square" : "square")}</button>
         <span data-l="Nominativo"><b>${esc(fullName(p))}</b><small>${esc(ruolo(p))}</small></span>
         <span data-l="Tipo">${esc(LIC[a.sub] || "")}</span>
@@ -365,12 +382,20 @@
     return `<h2 class="sec rise">Licenze<b>${todo}</b></h2>
       <div class="seg grp lic-f rise">${[["todo", `Da fare ${todo}`], ["done", `Fatte ${fatte}`], ["all", `Tutte ${all.length}`]].map(([k, t]) =>
         `<button data-act="lic" data-f="${k}" class="${f === k ? "on" : ""}">${t}</button>`).join("")}</div>
-      ${l.length ? `<button class="ghost na-btn rise" data-act="stampa">${icon("printer")}<span>Stampa nullaosta (${l.length})</span></button>` : ""}
-      ${l.length ? `<div class="lic-h"><span></span><span>Nominativo</span><span>Tipo</span><span>Luogo</span><span>Dal</span><span>Al</span><span>Giorni</span><span>Cte di Gruppo</span><span>Note</span><span>Iter</span></div>
-        <div class="list">${l.map(row).join("")}</div>` : `<p class="empty rise" style="--d:1">${f === "done" ? "Nessuna licenza registrata" : "Nessuna licenza da registrare"}</p>`}`;
+      <div class="lic-tools rise">
+        <div class="search">${icon("magnifying-glass")}<input type="search" placeholder="Cerca" data-input="lq" value="${esc(S.lq)}" autocomplete="off"></div>
+        <select data-change="lg" aria-label="Gruppo"><option value="">Tutti i gruppi</option>${opts(GRUPPI, S.lg)}</select>
+        <select data-change="lt" aria-label="Tipo di licenza"><option value="">Tutti i tipi</option>${opts(LIC, S.lt)}</select>
+        <select data-change="ls" aria-label="Ordina">${opts(SORT, S.ls)}</select>
+      </div>
+      ${l.length ? `<div class="lic-sel rise">
+        <label><input type="checkbox" data-change="selAll" ${sel.length === l.length ? "checked" : ""}><span>Seleziona tutte (${l.length})</span></label>
+        <button class="ghost" data-act="stampa" ${sel.length ? "" : "disabled"}>${icon("printer")}<span>Stampa nullaosta (${sel.length})</span></button></div>
+        <div class="lic-h"><span></span><span></span><span>Nominativo</span><span>Tipo</span><span>Luogo</span><span>Dal</span><span>Al</span><span>Giorni</span><span>Cte di Gruppo</span><span>Note</span><span>Iter</span></div>
+        <div class="list">${l.map(row).join("")}</div>` : `<p class="empty rise" style="--d:1">${S.lq || S.lg || S.lt ? "Nessun risultato" : f === "done" ? "Nessuna licenza registrata" : "Nessuna licenza da registrare"}</p>`}`;
   }
 
-  // nullaosta cartaceo (2 copie per A4, si taglia a metà): campi .f precompilati e modificabili sulla singola copia;
+  // nullaosta cartaceo (4 per A4, si taglia in quarti, copia unica): campi .f precompilati e modificabili sul singolo foglietto;
   // i testi fissi (data-k) sono il modello in db/modello.json: modificarne uno cambia tutti i nullaosta, anche i futuri
   const ED = 'contenteditable spellcheck="false"';
   const ENTE = "CENTRO ADDESTRATIVO AVIAZIONE dell'ESERCITO\n1° GRUPPO SQUADRONI ADDESTRATIVO “AURIGA”\n";
@@ -383,31 +408,37 @@
   };
   const mod = (k) => Store.tables.modello[k] ?? DEF[k];
   const T = (k, tag = "span", c = "") => `<${tag}${c && ` class="${c}"`} data-k="${k}" ${ED}>${esc(mod(k)).replace(/\n/g, "<br>")}</${tag}>`;
+  // sigla "a penna" con le iniziali: grafia e inclinazione fisse per persona (dal suo id), fuori dai data-k così non finisce nel modello
+  const PENNE = ["Herr Von Muellerhoff", "Mrs Saint Delafield", "La Belle Aurore"];
+  const sigla = (p) => {
+    if (!p) return "";
+    const h = [...p.id].reduce((s, c) => (Math.imul(s, 31) + c.charCodeAt(0)) >>> 0, 7);
+    return `<span class="sig" aria-hidden="true" style="font-family:'${PENNE[h % 3]}',cursive;--r:${-3 - (h % 9)}deg">${esc(initials(p))}<svg viewBox="0 0 100 20" preserveAspectRatio="none"><path d="M2 ${12 + (h % 6)} C 30 ${20 - (h % 5)}, 62 2, 98 ${5 + (h % 7)}"/></svg></span>`;
+  };
   function nullaosta(a) {
     const p = byId(a.personId) || {}, g = p.gruppo === "tecnica" ? "tecnica" : "officina";
+    const capo = Store.tables.personnel.find((x) => capoDi(x) === g);
     const tipo = (LIC[a.sub] || "").replace(/^Licenza (di )?/, "").replace(/^./, (c) => c.toLowerCase());
     const f = (v, mm) => `<span class="f" ${ED} style="min-width:${mm}mm">${esc(v ?? "")}</span>`;
     return `<div class="na">
-      <div class="na-head">${T("visto." + g, "div", "na-visto")}${T("ente." + g, "div")}</div>
+      <div class="na-head"><div class="na-visto">${T("visto." + g, "div")}${sigla(capo)}</div>${T("ente." + g, "div")}</div>
       <p>${T("ogg")} ${T("ogg2", "b")}</p>
-      <p class="na-txt">${T("t0")} ${f(p.nome && `${p.nome} ${p.cognome.toUpperCase()}`, 60)} ${T("t1")} ${f(tipo, 40)}
-        ${T("t2")} ${f(dn(a.dal), 28)} ${T("t3")} ${f(dn(a.al), 28)} ${T("t4")} ${f(giorni(a), 12)}${T("t5")} ${f(computabili(a), 12)}${T("t6")}
-        ${f(a.luogo, 50)} ${T("t7")} ${f(a.prov, 12)} ${T("t8")}</p>
-      ${T("cte", "div", "na-cte")}${T("cdt", "div", "na-cdt")}
+      <p class="na-txt">${T("t0")} ${f(p.nome && `${p.nome} ${p.cognome.toUpperCase()}`, 45)} ${T("t1")} ${f(tipo, 28)}
+        ${T("t2")} ${f(dn(a.dal), 22)} ${T("t3")} ${f(dn(a.al), 22)} ${T("t4")} ${f(giorni(a), 8)}${T("t5")} ${f(computabili(a), 8)}${T("t6")}
+        ${f(a.luogo, 35)} ${T("t7")} ${f(a.prov, 9)} ${T("t8")}</p>
+      <div class="na-firme"><div class="na-cte">${T("cte", "div")}${sigla(byId(Store.cfg.cmd))}</div>${T("cdt", "div", "na-cdt")}</div>
     </div>`;
   }
 
   // fuori da #app: refresh/render non lo toccano
   function naOpen() {
-    const { l } = licList();
+    const { sel } = licList();
     document.body.insertAdjacentHTML("beforeend", `<div id="na">
-      <div class="na-bar"><button class="cta" data-act="naPrint"><span>Stampa ${l.length} nullaosta</span><b>${icon("printer")}</b></button>
-        <span>Tocca un campo per modificarlo · 2 copie per foglio</span>
+      <div class="na-bar"><button class="cta" data-act="naPrint"><span>Stampa ${sel.length} nullaosta</span><b>${icon("printer")}</b></button>
+        <span>Tocca un campo per modificarlo · 4 per foglio</span>
         <button class="ghost" data-act="naClose">${icon("x")}<span>Chiudi</span></button></div>
-      ${l.map((a) => `<div class="na-page">${nullaosta(a)}<div class="na"></div></div>`).join("")}</div>`);
+      ${sel.map(nullaosta).join("")}</div>`);
   }
-  // la copia inferiore del foglio = quella superiore con le modifiche fatte a schermo (anche con Ctrl+P)
-  addEventListener("beforeprint", () => document.querySelectorAll(".na-page").forEach((p) => (p.lastElementChild.innerHTML = p.firstElementChild.innerHTML)));
 
   function render(anim) {
     S.me = S.me && byId(S.me.id);
@@ -681,7 +712,7 @@
     }),
     lic(t) { S.lic = t.dataset.f; render(); },
     stampa: () => { $("#na")?.remove(); naOpen(); },
-    naPrint: () => print(),
+    naPrint: () => document.fonts.ready.then(() => print()), // le grafie delle sigle si scaricano all'apertura
     naClose: () => $("#na")?.remove(),
     fatta: (t) => run(t, async () => {
       const done = await Store.mutate("absences", (l) => {
@@ -755,6 +786,9 @@
       toast("Gruppo: " + GRUPPI[t.value]);
     });
     if (t.dataset.change === "all") t.form.querySelectorAll("[name=p]").forEach((c) => (c.checked = t.checked));
+    if (t.dataset.change === "sel") { S.sel[t.checked ? "add" : "delete"](t.value); render(); }
+    if (t.dataset.change === "selAll") { licList().l.forEach((a) => S.sel[t.checked ? "add" : "delete"](a.id)); render(); }
+    if (["lg", "lt", "ls"].includes(t.dataset.change)) { S[t.dataset.change] = t.value; render(); }
     if (t.closest(".chi")) chiSync(t.closest(".chi"));
     if (t.form?.id === "addForm" && ["dal", "sub", "tipo"].includes(t.name)) dateSync(t.form);
   });
@@ -776,6 +810,18 @@
   document.addEventListener("focusout", (e) => {
     const k = e.target.dataset?.k, v = k && e.target.innerText.trim();
     if (k && v !== mod(k)) run(null, async () => { await Store.mutate("modello", (m) => { m[k] = v; }, "modello nullaosta"); toast("Modello salvato"); });
+  });
+
+  document.addEventListener("input", (e) => {
+    const t = e.target;
+    if (t.dataset.input !== "lq") return;
+    // cerca Licenze: filtra in licList (vale anche per stampa e "Seleziona tutte"), poi rimette il cursore dov'era
+    const c = t.selectionStart;
+    S.lq = t.value;
+    render();
+    const i = $("[data-input=lq]");
+    i.focus();
+    i.setSelectionRange(c, c);
   });
 
   document.addEventListener("input", (e) => {
