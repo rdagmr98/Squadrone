@@ -17,10 +17,11 @@ assert.deepEqual(who([], [L]), { mubqvhx6r8lx4o: ["Da approvare"], capo: ["Da ap
 // parere del capo: nessuna novità
 assert.deepEqual(who([L], [{ ...L, capo: "si" }]), {});
 // comandante accetta la licenza: Cte da approvare, Aiutante da registrare, utente informato
-assert.deepEqual(who([L], [{ ...L, cmd: "si" }]), { cte: ["Da approvare"], aiut: ["Licenza da registrare"], u1: ["Approvata dal comandante, ora al Cte di Gruppo"] });
-// Cte accetta: solo l'utente (l'Aiutante l'aveva già); registrata: niente
+assert.deepEqual(who([L], [{ ...L, cmd: "si" }]), { cte: ["Da approvare"], aiut: ["Licenza da registrare"], u1: ["Richiesta accettata"] });
+// Cte accetta: già accettata, niente; rifiuta: l'utente; registrata: niente
 const ok = { ...L, cmd: "si", cte: "si" };
-assert.deepEqual(who([{ ...L, cmd: "si" }], [ok]), { u1: ["Richiesta accettata"] });
+assert.deepEqual(who([{ ...L, cmd: "si" }], [ok]), {});
+assert.deepEqual(who([{ ...L, cmd: "si" }], [{ ...L, cmd: "si", cte: "no" }]), { u1: ["Richiesta rifiutata"] });
 assert.deepEqual(who([ok], [{ ...ok, fatta: true }]), {});
 // rifiuto del comandante
 assert.deepEqual(who([L], [{ ...L, cmd: "no" }]), { u1: ["Richiesta rifiutata"] });

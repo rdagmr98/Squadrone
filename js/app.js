@@ -9,8 +9,8 @@
     stormo72: { l: "Servizio isolato", i: "map-pin-line", c: "#60a5fa" }, // chiave storica: i record salvati restano validi
     orario: { l: "Assenza oraria", i: "clock-countdown", c: "#fb923c" },
     altro: { l: "Altro", i: "note-pencil", c: "#a78bfa" },
-    // recupero compensativo obbligatorio: creato in automatico col giorno dopo la guardia, non si sceglie a mano
-    rco: { l: "RCO", i: "bed", c: "#a3e635" }
+    // creato in automatico col giorno dopo la guardia, non si sceglie a mano
+    rco: { l: "Recupero compensativo obbligatorio (RCO)", i: "bed", c: "#a3e635" }
   };
   const PRESENTE = { l: "Presente", i: "check-circle", c: "#34d399" };
   const GRUPPI = { officina: "Officina", tecnica: "Sezione Tecnica" };
@@ -70,11 +70,10 @@
   const ruolo = (p) => isCmd(p) ? "Comandante" : [capoDi(p) ? "Capo " + GRUPPI[p.capo] : p.admin ? "Admin" : "", FN[p.fn]].filter(Boolean).join(" · ") || GRUPPI[grp(p)] || "";
   const home = (p) => (isAiut(p) ? "licenze" : isStaff(p) ? "oggi" : "me");
   // Impegno: cmd = decisione finale del comandante · capo = parere del capo gruppo (solo se inserito da un utente con gruppo)
-  // Licenza: dopo il comandante (cmd "si") decide il Cte di Gruppo (cte) · poi l'Aiutante Maggiore la registra (fatta)
-  const stato = (a) => (a.tipo === "licenza" && a.cmd === "si" ? a.cte || "attesa" : a.cmd || "attesa");
-  const stText = (a) => (stato(a) === "attesa" && a.cmd === "si" ? "In attesa Cte di Gruppo" : ST[stato(a)]);
+  // Licenza: accettata col sì del comandante; il Cte di Gruppo (cte) può solo rifiutarla dopo · poi l'Aiutante Maggiore la registra (fatta)
+  const stato = (a) => (a.tipo === "licenza" && a.cmd === "si" ? (a.cte === "no" ? "no" : "si") : a.cmd || "attesa");
   const stTag = (s, txt = ST[s]) => ` <span class="st ${s}">${txt}</span>`;
-  const badge = (a) => (stato(a) === "si" ? "" : stTag(stato(a), stText(a)));
+  const badge = (a) => (stato(a) === "si" ? "" : stTag(stato(a)));
   const canApprove = (p) => isCmd(p) || !!capoDi(p) || isCte(p);
   // coda del Cte di Gruppo: solo licenze già accettate dal comandante
   const daCte = (a) => a.tipo === "licenza" && a.cmd === "si" && !a.cte;
@@ -216,7 +215,7 @@
   function statusCard(acts, d) {
     const a = acts[0], t = a ? tipo(a) : PRESENTE;
     const sub = a ? [a.luogo && esc(a.luogo), a.dal !== a.al ? `fino al ${fmt(a.al, { day: "numeric", month: "long" })}` : "", a.dalle ? `dalle ${a.dalle} alle ${a.alle}` : "",
-      stato(a) === "si" ? "" : a.cmd ? stText(a) : "In attesa di approvazione", a.note ? esc(a.note) : ""].filter(Boolean) : [];
+      stato(a) === "si" ? "" : a.cmd ? ST[stato(a)] : "In attesa di approvazione", a.note ? esc(a.note) : ""].filter(Boolean) : [];
     return `
       <div class="shell rise" style="--d:1"><div class="core status" style="--c:${t.c}">
         <div class="eyebrow">Oggi · ${fmt(d, { weekday: "long", day: "numeric", month: "long" })}</div>
@@ -258,7 +257,7 @@
       const w = acts.find((x) => stato(x) === "attesa");
       return `<div class="row tap rise" style="--d:${Math.min(i, 8) + d0};--c:${t.c}" data-act="person" data-id="${p.id}">
         <span class="tag">${icon(t.i)}</span>
-        <span class="row-t"><b>${esc(fullName(p))}</b><small>${[...new Set(acts.map(tl))].join(" + ")}${when ? " · " + when : ""}${w ? stTag("attesa", stText(w)) : ""}</small>${notes ? `<em>${esc(notes)}</em>` : ""}</span>
+        <span class="row-t"><b>${esc(fullName(p))}</b><small>${[...new Set(acts.map(tl))].join(" + ")}${when ? " · " + when : ""}${w ? stTag("attesa") : ""}</small>${notes ? `<em>${esc(notes)}</em>` : ""}</span>
       </div>`;
     }).join("");
 
@@ -338,7 +337,7 @@
   // Aiutante Maggiore (desktop 16:9): licenze approvate dal comandante, da registrare; "fatta" = già lavorata
   // rifiutate dal Cte di Gruppo: non da fare, restano solo in "Tutte"
   const dn = (s) => fmt(s, { day: "2-digit", month: "2-digit", year: "numeric" });
-  const CTE = { si: "Approvata", no: "Rifiutata", attesa: "In attesa" };
+  const CTE = { si: "Approvata", no: "Rifiutata" };
   const nome = (a) => fullName(byId(a.personId));
   const SORT = {
     dal: ["Data ↑", (a, b) => a.dal.localeCompare(b.dal) || a.at.localeCompare(b.at)],
@@ -374,7 +373,7 @@
         <span data-l="Dal">${dn(a.dal)}</span>
         <span data-l="Al">${dn(a.al)}</span>
         <span data-l="Giorni">${giorni(a)}</span>
-        <span data-l="Cte di Gruppo">${stTag(a.cte || "attesa", CTE[a.cte || "attesa"])}</span>
+        <span data-l="Cte di Gruppo">${a.cte ? stTag(a.cte, CTE[a.cte]) : ""}</span>
         <span data-l="Note">${esc(a.note || "")}</span>
         <span data-l="Iter">${iter.filter(Boolean).map((x) => `<small>${esc(x)}</small>`).join("")}</span>
       </div>`;
@@ -648,7 +647,7 @@
     const back = S.back;
     render();
     back ? back() : closeSheet();
-    toast(r.cmd ? (lic ? "Salvato · in attesa del Cte di Gruppo" : "Salvato") : "Inviato per approvazione");
+    toast(r.cmd ? "Salvato" : "Inviato per approvazione");
   }
 
   async function refresh() {
