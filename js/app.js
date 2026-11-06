@@ -88,6 +88,7 @@
   const daFare = (a) => !a.fatta && a.cte !== "no";
   const giorni = (a) => Math.round((parse(a.al) - parse(a.dal)) / 864e5) + 1;
   // computabili = giorni lavorativi: esclusi sabato, domenica, festivi nazionali, Pasquetta e Santa Rosa (4/9, patrono di Viterbo)
+  // licenza straordinaria: computabili anche weekend e festivi (= giorni totali)
   const FEST = ["01-01", "01-06", "04-25", "05-01", "06-02", "08-15", "09-04", "11-01", "12-08", "12-25", "12-26"];
   const pasquetta = (y) => { // Pasqua gregoriana (Meeus) + 1 giorno
     const a = y % 19, b = Math.floor(y / 100), c = y % 100, h = (19 * a + b - Math.floor(b / 4) - Math.floor((b - Math.floor((b + 8) / 25) + 1) / 3) + 15) % 30;
@@ -95,6 +96,7 @@
     return iso(new Date(y, Math.floor(n / 31) - 1, (n % 31) + 2));
   };
   const computabili = (a) => {
+    if (a.sub === "straordinaria") return giorni(a);
     let n = 0;
     for (let s = a.dal; s <= a.al; s = addDays(s, 1)) { const d = parse(s); if (d.getDay() % 6 && !FEST.includes(s.slice(5)) && s !== pasquetta(d.getFullYear())) n++; }
     return n;
